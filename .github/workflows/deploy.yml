@@ -1,0 +1,55 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  # so a failed deploy can be retried without an empty commit
+  workflow_dispatch:
+
+# Least privilege: read the repo, write Pages, and mint the OIDC token
+# deploy-pages exchanges for its deployment credentials.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time. `cancel-in-progress: false` because cancelling a
+# half-finished deploy can leave the site serving a partial build.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # `npm ci` rather than `install`: it honours the lockfile exactly, so a
+      # deploy cannot silently pick up a different dependency than the one built
+      # and verified locally.
+      - run: npm ci
+
+      # `npm run build` is tsc --noEmit && vite build, so a type error fails the
+      # deploy rather than shipping a broken bundle.
+      - run: npm run build
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
