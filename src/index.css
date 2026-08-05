@@ -545,6 +545,58 @@ a.btn {
   transform: translateX(18px);
 }
 
+/* --- brand + version picker ----------------------------------------------- */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+  min-width: 0;
+}
+
+/* The native select sits invisible on top of a drawn face, so it keeps all of
+   its behaviour and none of its appearance. */
+.version-picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.version-picker select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.version-picker-face {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xxs);
+  padding: var(--spacing-xs) var(--spacing-sm) var(--spacing-xs) var(--spacing-lg);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text-secondary);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.version-picker:hover .version-picker-face {
+  background: var(--bg-quaternary);
+}
+
+.version-picker-face .select-chevron {
+  position: static;
+  width: 16px;
+  height: 16px;
+  color: var(--fg-secondary);
+}
+
 /* --- point-frequency map --------------------------------------------------- */
 /* Square, not stretched to the panel width: the frequency landscape has the same
    geometry as the canvas, and a wide band would misrepresent where the fast and

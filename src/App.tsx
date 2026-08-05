@@ -17,6 +17,7 @@ import { Renderer } from './engine/Renderer'
 import { randomSeed } from './engine/prng'
 import { ContactSheet } from './ui/ContactSheet'
 import { RippleCanvas } from './ui/RippleCanvas'
+import { PLATFORM_NAME, VERSIONS, VersionId, versionRoute } from './versions'
 import {
   Button,
   Icons,
@@ -25,6 +26,7 @@ import {
   Select,
   Slider,
   TextField,
+  VersionPicker,
 } from './ui/controls'
 
 const VIEWS = ['single', 'grid'] as const
@@ -92,12 +94,15 @@ export default function App() {
   return (
     <div className="app">
       <header className="header">
-        <span className="t-md-semibold">Ripple Avatars</span>
+        <VersionPicker
+          name={PLATFORM_NAME}
+          value="v1"
+          options={VERSIONS}
+          onChange={(id) => {
+            window.location.hash = versionRoute(id as VersionId)
+          }}
+        />
         <div className="header-actions">
-          <a className="btn" href="#/playground">
-            {Icons.structure}
-            <span className="btn-label">Playground</span>
-          </a>
           <Segmented value={view} options={VIEWS} onChange={setView} />
           <Button icon={Icons.shuffle} onClick={() => reseed(randomSeed())}>
             Randomise

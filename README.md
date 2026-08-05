@@ -12,14 +12,19 @@ See [PLAN.md](PLAN.md) for the full architecture and the analysis of how the
 reference artworks actually work (§1) — that analysis is what the shader
 implements, and it's worth reading before changing the pipeline.
 
-## Two pages
+## Two versions
 
-Hash routing, no router dependency (`src/Router.tsx`):
+One platform — **Avatar Playground** — with a version picker in the navbar. Hash
+routing, no router dependency (`src/Router.tsx`); versions are declared once in
+`src/versions.ts`.
 
-| Route | Page | Purpose |
+| Route | Version | Purpose |
 | --- | --- | --- |
-| `#/` | Avatars | the seeded avatar generator and contact sheet |
-| `#/playground` | Chromatic Ripple Playground | 500×500 exploration surface: draggable origins, water, audio |
+| `#/v1` | Isoline avatars | the original seeded generator and contact sheet |
+| `#/v2` | Chromatic ripple | **default.** 500×500 surface: four render engines, draggable origins, pointer and mic interaction |
+
+Landing without a version normalises the URL to `#/v2` via `replaceState`, so the
+address bar always names what is on screen without adding a history entry.
 
 The playground is a **second engine** under `src/playground/`, and a different
 rendering model from the avatar page. The avatar page draws isolines of a wave

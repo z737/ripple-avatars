@@ -47,6 +47,7 @@ import {
   WAVE_COUNTS,
   WaveCount,
 } from '../playground/params'
+import { PLATFORM_NAME, VERSIONS, VersionId, versionRoute } from '../versions'
 import { PlaygroundCanvas } from '../ui/PlaygroundCanvas'
 import {
   AngleDial,
@@ -60,6 +61,7 @@ import {
   Swatches,
   TextField,
   Toggle,
+  VersionPicker,
   XYPad,
 } from '../ui/controls'
 
@@ -71,7 +73,7 @@ const CANVAS = 500
 const MIN_CANVAS = 32
 
 /** Debug views are developer tooling, not part of the playground. Ask for them
- *  with #/playground?debug */
+ *  with #/v2?debug */
 const wantsDebug = () =>
   typeof window !== 'undefined' &&
   (window.location.hash.includes('debug') || window.location.search.includes('debug'))
@@ -212,13 +214,14 @@ export default function PlaygroundPage() {
   return (
     <div className="app">
       <header className="header">
-        <div className="header-actions">
-          <span className="t-md-semibold">Chromatic Ripple Playground</span>
-          <a className="btn" href="#/">
-            {Icons.grid}
-            <span className="btn-label">Avatars</span>
-          </a>
-        </div>
+        <VersionPicker
+          name={PLATFORM_NAME}
+          value="v2"
+          options={VERSIONS}
+          onChange={(id) => {
+            window.location.hash = versionRoute(id as VersionId)
+          }}
+        />
         <div className="header-actions">
           <Button icon={Icons.shuffle} onClick={() => reseed(randomSeed())}>
             Randomize

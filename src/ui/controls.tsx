@@ -188,6 +188,48 @@ export function Toggle({
   )
 }
 
+/** The platform name plus the version it is showing.
+ *
+ *  A native select rather than a custom menu: it needs no outside-click handling,
+ *  no focus trap and no keyboard implementation, and on mobile it opens the
+ *  platform picker. The chevron is drawn over it because a bare native control
+ *  will not match the rest of the chrome. */
+export function VersionPicker({
+  name,
+  value,
+  options,
+  onChange,
+}: {
+  name: string
+  value: string
+  options: readonly { id: string; label: string; summary: string }[]
+  onChange: (id: string) => void
+}) {
+  const current = options.find((o) => o.id === value)
+  return (
+    <div className="brand">
+      <span className="t-md-semibold">{name}</span>
+      <div className="version-picker" title={current?.summary}>
+        <select
+          value={value}
+          aria-label="Version"
+          onChange={(e) => onChange(e.target.value)}
+        >
+          {options.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label} — {o.summary}
+            </option>
+          ))}
+        </select>
+        <span className="version-picker-face" aria-hidden="true">
+          {current?.label ?? value}
+          <Chevron />
+        </span>
+      </div>
+    </div>
+  )
+}
+
 /** The per-point frequency landscape, and the range of rates it contains.
  *
  *  Drawn from `omega0At`, the same function the simulation uses, so this is the
