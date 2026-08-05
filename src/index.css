@@ -1,0 +1,793 @@
+/* ---------------------------------------------------------------------------
+   Design tokens — resolved from the Vachana Playground Figma variables.
+   Colours, typography and spacing only; layout is this app's own.
+   --------------------------------------------------------------------------- */
+:root {
+  /* Colors/Background */
+  --bg-primary: #ffffff;
+  --bg-secondary: #fafafa;
+  --bg-secondary-alt: #fafafa;
+  --bg-tertiary: #f2f2f2;
+  --bg-quaternary: #ebebeb;
+
+  /* Colors/Border */
+  --border-primary: #dedede;
+  --border-secondary: #ebebeb;
+  --border-brand: #333333;
+
+  /* Colors/Text */
+  --text-primary: #333333;
+  --text-secondary: #4d4d4d;
+  --text-tertiary: #808080;
+  --text-quaternary: #808080;
+  --text-brand-tertiary: #a0a0a0;
+
+  /* Colors/Foreground */
+  --fg-primary: #333333;
+  --fg-secondary: #808080;
+  --fg-tertiary: #a0a0a0;
+  --fg-quaternary: #b3b3b3;
+  --fg-disabled: #cccccc;
+
+  /* Component colors */
+  --button-secondary-bg: #ffffff;
+  --button-secondary-border: #dedede;
+  --button-secondary-fg: #4d4d4d;
+  --featured-icon-border: #ebebeb;
+  --utility-gray-300: #dedede;
+
+  /* Effects/Shadows */
+  --shadow-xs: 0 1px 2px 0 #1018280d;
+  --shadow-skeumorphic-inner: inset 0 -2px 0 0 #1018280d;
+  --shadow-skeumorphic-inner-border: inset 0 0 0 1px #1018282e;
+
+  /* Spacing */
+  --spacing-none: 0px;
+  --spacing-xxs: 2px;
+  --spacing-xs: 4px;
+  --spacing-sm: 6px;
+  --spacing-md: 8px;
+  --spacing-lg: 12px;
+  --spacing-xl: 16px;
+  --spacing-2xl: 20px;
+  --spacing-3xl: 24px;
+  --spacing-4xl: 32px;
+  --spacing-6xl: 48px;
+  --spacing-8xl: 80px;
+
+  /* Radius */
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-4xl: 24px;
+  --radius-full: 9999px;
+
+  /* Typography */
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --text-xs: 12px;
+  --lh-xs: 18px;
+  --text-sm: 14px;
+  --lh-sm: 20px;
+  --text-md: 16px;
+  --lh-md: 24px;
+  --text-xl: 20px;
+  --lh-xl: 30px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* --- text styles ---------------------------------------------------------- */
+.t-md-semibold {
+  font-size: var(--text-md);
+  line-height: var(--lh-md);
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+}
+.t-sm-semibold {
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+}
+.t-sm-medium {
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-primary);
+}
+.t-sm-regular {
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-weight: var(--fw-regular);
+  color: var(--text-secondary);
+}
+.t-xs-semibold {
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+}
+.t-xs-regular {
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--fw-regular);
+  color: var(--text-tertiary);
+}
+
+/* --- app shell ------------------------------------------------------------ */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-primary);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 60px;
+  flex: 0 0 60px;
+  padding: 0 var(--spacing-2xl);
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-secondary);
+  /* origin handles pinned off-frame pass under the chrome, not over it */
+  position: relative;
+  z-index: 2;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-2xl);
+  background: var(--bg-secondary);
+  min-width: 0;
+  padding: var(--spacing-4xl);
+}
+
+.stage-canvas-wrap {
+  border-radius: var(--radius-2xl);
+  overflow: hidden;
+  background: var(--bg-primary);
+  box-shadow: var(--shadow-xs);
+  border: 1px solid var(--border-secondary);
+  line-height: 0;
+}
+
+.stage-canvas-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.stage-caption {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  position: relative;
+  z-index: 2;
+}
+
+.seed-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-lg);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text-tertiary);
+}
+
+.panel {
+  position: relative;
+  z-index: 2;
+  width: 320px;
+  flex: 0 0 320px;
+  border-left: 1px solid var(--border-secondary);
+  background: var(--bg-primary);
+  overflow-y: auto;
+  padding: var(--spacing-4xl) var(--spacing-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3xl);
+}
+
+.panel-divider {
+  height: 1px;
+  background: var(--border-secondary);
+  border: 0;
+  margin: 0;
+}
+
+/* --- section (featured icon + heading + supporting text) ------------------ */
+.section-head {
+  display: flex;
+  gap: var(--spacing-lg);
+  align-items: flex-start;
+  margin-bottom: var(--spacing-lg);
+}
+
+.featured-icon {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--featured-icon-border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-primary);
+  color: var(--fg-secondary);
+}
+
+.section-head-text {
+  min-width: 0;
+}
+
+.section-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-xl);
+  padding: var(--spacing-lg);
+}
+
+/* --- button (Figma: Buttons/Secondary) ----------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: var(--button-secondary-bg);
+  border: 1px solid var(--button-secondary-border);
+  border-radius: var(--radius-lg);
+  color: var(--button-secondary-fg);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover {
+  background: var(--bg-secondary);
+}
+.btn:active {
+  background: var(--bg-tertiary);
+}
+.btn-label {
+  padding: 0 var(--spacing-xxs);
+}
+.btn:disabled {
+  color: var(--fg-disabled);
+  cursor: not-allowed;
+}
+
+/* --- segmented control (Figma: Horizontal tabs) -------------------------- */
+.segmented {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs);
+  background: var(--bg-secondary-alt);
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-full);
+}
+
+.segmented-item {
+  flex: 1 0 0;
+  min-width: 0;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-md) var(--spacing-lg);
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-full);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text-quaternary);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.segmented-item[data-active='true'] {
+  background: var(--bg-quaternary);
+  color: var(--text-secondary);
+}
+
+/* --- select (Figma: Input dropdown) -------------------------------------- */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.field-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+}
+
+.field-value {
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.select {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.select select {
+  appearance: none;
+  width: 100%;
+  height: 36px;
+  padding: var(--spacing-md) 34px var(--spacing-md) 14px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.select-chevron {
+  position: absolute;
+  right: 10px;
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+  color: var(--fg-quaternary);
+}
+
+.text-input {
+  width: 100%;
+  height: 36px;
+  padding: var(--spacing-md) 14px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-primary);
+}
+.text-input:focus {
+  outline: none;
+  border-color: var(--border-brand);
+}
+
+/* --- slider -------------------------------------------------------------- */
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 20px;
+  background: transparent;
+  cursor: pointer;
+  margin: 0;
+}
+
+.slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--bg-quaternary);
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -5px;
+  border-radius: var(--radius-full);
+  background: var(--bg-primary);
+  border: 1px solid var(--utility-gray-300);
+  box-shadow: var(--shadow-xs);
+}
+.slider::-moz-range-track {
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--bg-quaternary);
+}
+.slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--bg-primary);
+  border: 1px solid var(--utility-gray-300);
+  box-shadow: var(--shadow-xs);
+}
+
+/* --- contact sheet ------------------------------------------------------- */
+.sheet {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: var(--spacing-lg);
+  width: 100%;
+  max-width: 720px;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.sheet-cell {
+  aspect-ratio: 1;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg-primary);
+  padding: 0;
+  cursor: pointer;
+  line-height: 0;
+}
+.sheet-cell[data-active='true'] {
+  border-color: var(--border-brand);
+}
+.sheet-cell img,
+.sheet-cell canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* --- playground: toggle, xy pad, button rows ------------------------------ */
+a.btn {
+  text-decoration: none;
+}
+
+.btn-row {
+  display: flex;
+  gap: var(--spacing-md);
+}
+.btn-row > * {
+  flex: 1 0 0;
+  min-width: 0;
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  min-height: 28px;
+}
+
+.toggle {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 22px;
+  padding: 2px;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-full);
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.toggle[data-on='true'] {
+  background: var(--fg-primary);
+  border-color: var(--fg-primary);
+}
+.toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.toggle-knob {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--bg-primary);
+  box-shadow: var(--shadow-xs);
+  transform: translateX(0);
+  transition: transform 120ms ease;
+}
+.toggle[data-on='true'] .toggle-knob {
+  transform: translateX(18px);
+}
+
+/* --- point-frequency map --------------------------------------------------- */
+/* Square, not stretched to the panel width: the frequency landscape has the same
+   geometry as the canvas, and a wide band would misrepresent where the fast and
+   slow regions actually sit. */
+.freqmap {
+  width: 104px;
+  height: 104px;
+  display: block;
+  margin: 0 auto;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-md);
+  /* 48x48 of meaning, not of pixels — let it smooth */
+  image-rendering: auto;
+}
+
+/* --- pigment swatches ----------------------------------------------------- */
+.swatches {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.swatch-row {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.swatch {
+  flex: 1 0 0;
+  min-width: 0;
+  aspect-ratio: 1;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #00000014;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  position: relative;
+  transition: transform 90ms ease;
+}
+.swatch:hover {
+  transform: scale(1.08);
+}
+
+/* The ring is drawn outside the swatch so it never hides the colour. */
+.swatch[data-on='true'] {
+  border-color: var(--fg-primary);
+  box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 3.5px var(--fg-primary);
+  z-index: 1;
+}
+
+.swatch-order {
+  font-size: 10px;
+  font-weight: var(--fw-semibold);
+  line-height: 1;
+  color: #1f1f1fcc;
+  text-shadow: 0 0 3px #ffffffcc;
+}
+
+/* --- light direction dial ------------------------------------------------- */
+.dial {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  max-height: 116px;
+  max-width: 116px;
+  margin: 0 auto;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-xs);
+  cursor: grab;
+  touch-action: none;
+}
+.dial:active {
+  cursor: grabbing;
+}
+
+.dial-preview {
+  position: absolute;
+  inset: 22%;
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 0 0 1px #0000001a;
+}
+
+.dial-dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: var(--radius-full);
+  background: #fff;
+  border: 1.5px solid var(--fg-primary);
+  box-shadow: var(--shadow-xs);
+}
+
+.xypad {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  max-height: 116px;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+  box-shadow: var(--shadow-xs);
+  cursor: crosshair;
+  touch-action: none;
+  overflow: hidden;
+}
+
+.xypad-cross {
+  position: absolute;
+  background: var(--border-secondary);
+}
+.xypad-cross-h {
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+}
+.xypad-cross-v {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+}
+
+.xypad-dot {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: var(--radius-full);
+  background: var(--fg-primary);
+  border: 2px solid var(--bg-primary);
+  box-shadow: var(--shadow-xs);
+}
+
+/* --- playground: canvas stage and origin handles -------------------------- */
+.pg-stage {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.pg-canvas-box {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-2xl);
+  overflow: hidden;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-secondary);
+  box-shadow: var(--shadow-xs);
+  line-height: 0;
+}
+
+.pg-canvas-box canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* Reaches past the canvas so origins can be dragged off-frame. Transparent to
+   the pointer, so hover water still reaches the canvas below. */
+.pg-origins {
+  position: absolute;
+  pointer-events: none;
+}
+
+/* The canvas occupies the middle 1/1.5 of the overlay, hence 16.667%. */
+.pg-origins-frame {
+  position: absolute;
+  inset: 16.667%;
+  border: 1px dashed var(--fg-quaternary);
+  border-radius: var(--radius-2xl);
+}
+
+.pg-handle {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--fg-primary);
+  border-radius: var(--radius-full);
+  background: #ffffffe6;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: var(--fw-semibold);
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+  box-shadow: var(--shadow-xs);
+}
+.pg-handle:active {
+  cursor: grabbing;
+}
+.pg-handle[data-active='true'] {
+  background: var(--fg-primary);
+  color: #fff;
+}
+.pg-handle[data-outside='true'] {
+  border-style: dashed;
+}
+
+.pg-handle-num {
+  line-height: 1;
+}
+
+.pg-edge {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: var(--radius-full);
+  background: var(--fg-primary);
+  box-shadow: 0 0 0 3px #ffffffb3;
+}
+
+/* --- notes --------------------------------------------------------------- */
+.note {
+  margin: 0;
+}
+.note-warn {
+  color: var(--text-secondary);
+  padding: var(--spacing-md);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+/* --- error --------------------------------------------------------------- */
+.error {
+  max-width: 420px;
+  padding: var(--spacing-xl);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-xl);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
