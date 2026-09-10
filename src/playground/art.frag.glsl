@@ -75,6 +75,13 @@ uniform float uAmbient;
 uniform float uSpecular;
 uniform float uMetallic;   // 0 matte, 0.4 glossy, 1 chrome
 
+// --- material optics ---
+uniform float uIridescence;   // thin-film colour from surface height
+uniform float uTranslucency;  // light bleeding through and around
+uniform float uAnisotropy;    // specular stretched along a tangent
+uniform vec2  uAnisoDir;      // that tangent, unit length
+uniform float uGranularity;   // static grain-scale relief
+
 uniform float uChromatic;
 uniform float uGrain;
 uniform float uGrainScale;
@@ -88,19 +95,6 @@ uniform float uShapeSize;
 uniform float uShapeSoft;
 
 uniform int   uDebug;
-
-// --- ink engine ---
-uniform float uStroke;      // stroke half-width, px at the 640 reference
-uniform int   uInkLayers;
-uniform float uInkSplit;    // offset between strokes, uv
-uniform float uInkHue;      // how far apart in the gradient strokes sample
-uniform float uInkGlow;
-uniform float uInkRot;
-uniform int   uInkBlend;    // 0 add, 1 opaque, 2 multiply
-
-// --- heatmap engine ---
-uniform vec3  uRampLab[4];   // palette stops, already OKLab, sorted by lightness
-uniform int   uRampCount;
 
 // --- medium engine ---
 uniform int       uEngine;         // 0 = analytic waves, 1 = oscillator medium
@@ -167,15 +161,6 @@ vec3 meshOklab(vec2 p) {
  *  rather than changing how many there are. */
 vec3 meshLin(vec2 p) {
   return oklabToLin(mix(uNeutralLab, meshOklab(p), uMesh));
-}
-
-/** The ink gradient: the same colours, rotated about the frame centre so a
- *  stroke's hue differs from the paper underneath it instead of vanishing into
- *  it, and taken at full strength rather than faded. */
-vec3 inkLin(vec2 p) {
-  vec2 d = p - 0.5;
-  float c = cos(uInkRot), sn = sin(uInkRot);
-  return oklabToLin(meshOklab(vec2(c * d.x - sn * d.y, sn * d.x + c * d.y) + 0.5));
 }
 
 // ===========================================================================
@@ -485,121 +470,6 @@ float mediumHeight(vec2 p, out vec2 grad, out float add, out float mul) {
 }
 
 // ===========================================================================
-// ink engine
-// ===========================================================================
-/** Isoline coverage. `w` is the half-width in pixels.
- *
- *  Antialiased from the *analytic* gradient rather than fwidth(): the field's
- *  slope is known exactly, and screen-space derivatives quantise to the pixel
- *  grid and fall apart precisely where the interference gets tight — which is
- *  where these strokes are most crowded. */
-float strokeCoverage(float v, float slope, float w) {
-  float aa = max(slope / uResolution.y, 1e-7);
-  return 1.0 - smoothstep(w * aa, (w + 1.0) * aa, abs(v));
-}
-
-/** Draw the field's zero set as stroked contours over the paper.
- *
- *  Several strokes are offset along the local field normal, and each samples the
- *  ink gradient at a slightly different place. That offset is the whole trick: it
- *  is why a magenta capsule has a cyan one beside it rather than the entire frame
- *  drifting through one hue. */
-vec3 inkRender(vec2 uv, float h0, vec2 grad0) {
-  vec3 paper = meshLin(uv);
-
-  float gm = length(grad0);
-  vec2 nrm = gm > 1e-7 ? grad0 / gm : vec2(1.0, 0.0);
-  float lw = uStroke * max(uResolution.y / 640.0, 0.35);
-
-  vec3 acc = vec3(0.0);
-  float cov = 0.0;    // is there ink here at all
-  float wsum = 0.0;   // how many strokes overlap here
-  float hsum = 0.0;   // sharpened weight, for hue selection
-  float denom = float(max(uInkLayers - 1, 1));
-
-  for (int L = 0; L < 5; L++) {
-    if (L >= uInkLayers) break;
-    float t = uInkLayers == 1 ? 0.0 : float(L) / denom - 0.5;
-
-    vec2 g;
-    float a, m;
-    float v = heightField(uv + nrm * uInkSplit * t, g, a, m);
-    float mask = strokeCoverage(v, length(g), lw);
-
-    vec3 c = inkLin(uv + nrm.yx * uInkHue * t);
-
-    // Hue picked by a sharpened weight so the dominant stroke wins, instead of
-    // every overlapping stroke averaging into one pastel mid-hue.
-    float hw = mask * mask * mask;
-    acc  += c * hw;
-    hsum += hw;
-    cov   = max(cov, mask);
-    wsum += mask;
-  }
-
-  vec3 ink = acc / max(hsum, 1e-4);
-  float overlap = clamp(wsum - cov, 0.0, 2.5);
-
-  if (uInkBlend == 0) {
-    // Additive: only *genuine* overlap brightens. Plain addition blows to white
-    // the moment two strokes touch; this keeps a lone stroke saturated and
-    // reserves the pale cores for real crossings.
-    ink *= 1.0 + overlap * uInkGlow;
-  } else if (uInkBlend == 2) {
-    // Overprint: ink darkens the paper, and crossings darken further.
-    ink = paper * ink * 2.0 * (1.0 - overlap * 0.22);
-  }
-  // opaque (1): the dominant stroke's colour, unmodified
-
-  return mix(paper, ink, clamp(cov, 0.0, 1.0));
-}
-
-// ===========================================================================
-// heatmap engine
-// ===========================================================================
-/** Palette stops as a ramp. Sorted by lightness on the CPU, so the scale reads
- *  as a monotone heat scale rather than as arbitrary bands. */
-vec3 heatLab(float t) {
-  int n = max(uRampCount, 1);
-  if (n == 1) return uRampLab[0];
-  float x = clamp(t, 0.0, 1.0) * float(n - 1);
-  int i = min(int(floor(x)), n - 2);
-  return mix(uRampLab[i], uRampLab[i + 1], clamp(x - float(i), 0.0, 1.0));
-}
-
-/** False-colour the signed height: troughs at one end of the ramp, crests at the
- *  other, the neutral plane in the middle. This is a *measurement* view rather
- *  than a material — depth is read directly off the field instead of being
- *  inferred from how a light falls on it.
- *
- *  Inverted in OKLab: lightness mirrored and chroma negated, so the result is the
- *  complement of the pigment. That is what keeps it legible as an instrument —
- *  it cannot be confused with the material views at a glance.
- *
- *  A single stop still has to produce a ramp, so lightness is modulated by height
- *  as well; with one colour selected that modulation is the entire scale. */
-vec3 heatmapRender(float h) {
-  float t = clamp(h * 0.5 + 0.5, 0.0, 1.0);
-
-  vec3 lab = heatLab(t);
-
-  // Inverse *hue*: chroma negated, so every colour becomes its complement. Also
-  // pushed harder, because a complementary pastel is still a pastel and a heat
-  // scale has to be readable at a glance.
-  lab.y = -lab.y * 1.7;
-  lab.z = -lab.z * 1.7;
-
-  // Lightness spans the scale rather than being inverted from the palette's own.
-  // Inverting it looked correct on paper and was unusable: pastels all sit near
-  // L 0.8, so 1 - L put every stop between 0.15 and 0.25 and the whole map came
-  // out near black with no legible depth. Height drives lightness instead, which
-  // is what makes a trough read as deep and a crest as raised.
-  lab.x = mix(0.18, 0.94, t);
-
-  return oklabToLin(lab);
-}
-
-// ===========================================================================
 // shape masks
 // ===========================================================================
 float sdRoundedBox(vec2 p, vec2 b, float r) {
@@ -620,6 +490,66 @@ float hash21(vec2 p) {
   return fract(p.x * p.y);
 }
 
+/** Smooth value noise. Needed by granularity, which perturbs the *normal* and
+ *  therefore has to be differentiable — hashed white noise would give a normal
+ *  that changes completely between neighbouring pixels and read as static. */
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(hash21(i), hash21(i + vec2(1.0, 0.0)), f.x),
+    mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), f.x),
+    f.y
+  );
+}
+
+/** Granular relief: bedforms plus grains, as a normal perturbation.
+ *
+ *  Applied to the normal rather than to the height field on purpose. Adding it
+ *  to the height would put it through the wave equation's analytic gradient,
+ *  where it is not differentiable in closed form, and it would feed the
+ *  interference — grains are a property of the surface, not another wave.
+ *
+ *  Two scales, and the coarse one matters most. Sand ripples are *static
+ *  bedforms*: they are shaped by wind over hours and then stay put. They are not
+ *  travelling waves, and trying to get them out of the medium does not work —
+ *  a granular material damps so hard that its waves die within a quarter of the
+ *  frame, so unless an origin happens to sit inside the visible area there is
+ *  nothing to see. Modelling the ripples as relief instead is both cheaper and
+ *  closer to the real thing, and it makes the look independent of where the
+ *  seed happened to put the origins.
+ *
+ *  The bedform is stretched along uAnisoDir, because ripples run perpendicular
+ *  to the wind and a circular noise reads as gravel rather than as dune. */
+float granularHeight(vec2 p) {
+  vec2 t = uAnisoDir;
+  vec2 q = vec2(dot(p, t) * 0.22, dot(p, vec2(-t.y, t.x)));  // 4.5x along the wind
+  float dune = vnoise(q * 13.0) + 0.5 * vnoise(q * 27.0 + 4.1);
+  float grit = vnoise(p * 210.0) + 0.5 * vnoise(p * 520.0 + 11.3);
+  return dune * 0.85 + grit * 0.12;
+}
+
+vec3 granularNormal(vec2 uv, vec3 n) {
+  if (uGranularity < 0.001) return n;
+  const float E = 0.0016;
+  float h0 = granularHeight(uv);
+  float hx = granularHeight(uv + vec2(E, 0.0));
+  float hy = granularHeight(uv + vec2(0.0, E));
+  vec2 g = vec2(hx - h0, hy - h0) / E;
+  return normalize(n + vec3(-g.x, 0.0, -g.y) * uGranularity * 0.06);
+}
+
+/** Thin-film interference: colour from optical path length, which on a height
+ *  field is the height itself. A cosine palette offset per channel is the cheap
+ *  standard for this and is what gives the oil-slick banding.
+ *
+ *  Fresnel is folded into the phase so the bands sweep as the surface turns
+ *  away, rather than sitting on it like printed stripes. */
+vec3 thinFilm(float h, float fres) {
+  float phase = h * 3.4 + fres * 1.7;
+  return 0.5 + 0.5 * cos(6.28318 * (phase + vec3(0.0, 0.33, 0.67)));
+}
+
 // ===========================================================================
 void main() {
   // y down, so origins, mesh attractors and the pointer share one convention
@@ -633,12 +563,8 @@ void main() {
     ? mediumHeight(uv, grad, add, mul)   // the field is a vibrating medium
     : heightField(uv, grad, add, mul);   // closed-form waves
 
-  // The ink engine reads the same field a different way: it draws the zero set
-  // as stroked contours instead of lighting a surface, so it takes none of the
-  // normal, light or refraction work below. Wave depth, Light and Shadow are
-  // inert in this mode — there is no relief for them to describe.
-  // Hoisted: the grain leans on surface steepness, and the debug views need the
-  // lit branch's intermediates, so both have to outlive the branch.
+  // Declared up here because the grain leans on surface steepness and the debug
+  // views need these intermediates, both of which outlive the shading below.
   vec3 col;
   float steep = 0.0;
   vec3 normal = vec3(0.0, 1.0, 0.0);
@@ -647,20 +573,14 @@ void main() {
   float sh = 0.0;
   vec2 refr = vec2(0.0);
 
-  if (uEngine == 3) {
-    col = heatmapRender(h);
-    steep = 0.3;
-  } else if (uEngine == 2) {
-    col = inkRender(uv, h, grad);
-    // strokes are flat, so the pigment-tier grain follows ink coverage instead
-    steep = 0.35;
-  } else {
-
   // Depth arrives pre-divided by the base frequency, so a denser pattern has
   // proportionally smaller ripples instead of ever-steeper walls — the light
   // stays readable as Density moves.
   vec2 slopeVec = grad * uDepth * (1.0 + uAudio.y * 0.6);
   normal = normalize(vec3(-slopeVec.x, 1.0, -slopeVec.y));
+  // Grain-scale relief, added to the normal after the wave normal is built so
+  // it textures the surface without entering the physics.
+  normal = granularNormal(uv, normal);
 
   // --- pigment, refracted by the surface ----------------------------------
   // Offsetting along the normal means flat areas split by nothing at all and
@@ -713,13 +633,55 @@ void main() {
   vec3 Hv = normalize(L + V);
   float specPow = mix(22.0, 220.0, uMetallic);
   float specAmt = mix(0.26, 1.9, uMetallic);
-  float spec = pow(max(dot(normal, Hv), 0.0), specPow)
+
+  float ndh = max(dot(normal, Hv), 0.0);
+  float spec = pow(ndh, specPow)
              * uSpecular * specAmt * uLightIntensity * (0.25 + 0.75 * steep);
+
+  // Anisotropic sheen: a Ward lobe with unequal roughness along and across the
+  // grain. Wide along it, tight across it, which is what turns the round
+  // specular dot of a smooth surface into the streak you get off brushed metal
+  // or satin.
+  //
+  // Added alongside the isotropic term rather than replacing it, so a material
+  // with the slider at zero renders exactly as it did before this existed.
+  //
+  // A first attempt tried to fake this by squashing the half-vector's
+  // across-grain component and feeding it back into the Blinn exponent. It
+  // measured 0.4 levels out of 255 across the slider's whole range — because
+  // the squashed deviation exceeded 1 almost everywhere, the clamp took it to
+  // zero, and the control was quietly *removing* the highlight instead of
+  // stretching it.
+  if (uAnisotropy > 0.001) {
+    vec3 traw = vec3(uAnisoDir.x, 0.0, uAnisoDir.y);
+    vec3 T = normalize(traw - normal * dot(normal, traw));
+    vec3 B = cross(normal, T);
+    float hn = max(dot(Hv, normal), 1e-4);
+    float ht = dot(Hv, T);
+    float hb = dot(Hv, B);
+    float ax = 0.45;                                 // along the grain: broad
+    // Across it: tight, but not arbitrarily so. At 14x the lobe was narrow
+    // enough to resolve individual granular normals and the streak broke up
+    // into glitter; 8x keeps it a streak on a textured surface.
+    float ay = 0.45 / (1.0 + uAnisotropy * 8.0);
+    float lobe = exp(-2.0 * ((ht * ht) / (ax * ax) + (hb * hb) / (ay * ay)) / (1.0 + hn));
+    spec += lobe * uSpecular * specAmt * uLightIntensity * uAnisotropy * 2.2;
+  }
 
   // Lambert, normalised so a flat surface returns the pigment unchanged. The
   // light is here to reveal slope, not to raise the exposure of the whole
   // frame — without this the pigment clips to white and the mesh gradient the
   // material is made of stops being visible at all.
+  //
+  // Translucency wraps that term around the terminator. In a scattering
+  // material light enters, bounces below the surface and leaves somewhere it
+  // was never directly lit, so the dark side is never fully dark and the falloff
+  // is soft rather than a hard edge at dot(n,L) = 0. Wrapped diffuse is the
+  // standard cheap stand-in and it is the whole difference between wax and
+  // plastic.
+  float wrap = uTranslucency * 0.9;
+  float nl = (dot(normal, L) + wrap) / (1.0 + wrap);
+  diffuse = max(nl, 0.0);
   float lambert = uAmbient + (1.0 - uAmbient) * diffuse / max(L.y, 0.15);
 
   // The signed-slope term: a bright edge and a dark opposite edge on every
@@ -736,7 +698,26 @@ void main() {
   // lighter turquoise — with only a small neutral lift at the very brightest
   // edges. Shadows are darker pigment, never black.
   col = pigment * max(shade, 0.0);
+
+  // Forward scatter: thin, steeply tilted parts of the surface glow with their
+  // own pigment where the light is behind them. Steepness stands in for
+  // thinness, which is what an edge-lit translucent material does.
+  if (uTranslucency > 0.001) {
+    float back = pow(max(dot(-normal, L), 0.0), 2.0);
+    col += pigment * (back * 0.55 + steep * 0.22) * uTranslucency * uLightIntensity;
+  }
+
   col += vec3(1.0, 0.99, 0.96) * (hl * hl * 0.09 + spec) * uLightIntensity;
+
+  // Thin film. Applied after shading and scaled by the specular fresnel, so it
+  // rides on the surface as a reflection would rather than tinting the body of
+  // the material. Screen-blended: a film adds colour, it does not replace it.
+  if (uIridescence > 0.001) {
+    float fres0 = pow(1.0 - clamp(normal.y, 0.0, 1.0), 1.5);
+    vec3 film = thinFilm(h, fres0);
+    float amt = uIridescence * (0.25 + 0.75 * fres0);
+    col = col + film * amt * (0.35 + 0.65 * max(shade, 0.0));
+  }
 
   // --- restrained fake reflection -----------------------------------------
   // No environment map: the material reflects its own pigment, sampled through
@@ -749,8 +730,6 @@ void main() {
   float reflSpread = mix(0.3, 0.85, uMetallic);
   col = mix(col, meshLin(uv + normal.xz * reflSpread) * mix(1.05, 1.3, uMetallic),
             fres * reflAmt);
-
-  }  // end lit branch
 
   // --- tonemap ------------------------------------------------------------
   col *= uExposure * (1.0 + 0.1 * uAudio.x);

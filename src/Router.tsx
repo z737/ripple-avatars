@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import App from './App'
 import PlaygroundPage from './pages/PlaygroundPage'
+import TilesPage from './pages/TilesPage'
 import { DEFAULT_VERSION, VersionId, versionFromHash, versionRoute } from './versions'
 
 /** Hash routing, so a version is linkable without pulling in a router.
@@ -32,5 +33,7 @@ export function Router() {
     return () => window.removeEventListener('hashchange', sync)
   }, [])
 
-  return version === 'v1' ? <App /> : <PlaygroundPage />
+  if (version === 'v1') return <App />
+  if (version === 'v2') return <PlaygroundPage />
+  return <TilesPage />
 }

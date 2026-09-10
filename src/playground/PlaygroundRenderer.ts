@@ -29,7 +29,6 @@ import {
   grainToAmp,
   INTERACTION_REF_FREQ,
   MEDIUM_BASE_SIZE,
-  QUALITY_LATTICE,
   QUALITY_RENDER_SCALE,
   mediumDt,
   viscosityToGamma,
@@ -41,18 +40,15 @@ import {
   MEDIUM_TAP_REF,
   MEDIUM_DRIVE_SIGMA,
   MEDIUM_GAIN,
+  MEDIUM_NU_H2,
   MEDIUM_MIN,
   toMediumUv,
-  chromaticToInkGlow,
-  chromaticToInkHue,
-  chromaticToInkLayers,
-  chromaticToInkSplit,
-  thicknessToStroke,
   interactionToDisplacement,
   interferenceToMix,
   lightIntensityToAmount,
   lightVector,
   densityToWaveSpeed,
+  densityToDrag,
   loudnessToDrive,
   mediumDepthDivisor,
   mediumSourceWeight,
@@ -73,7 +69,6 @@ import {
   DEBUG_INDEX,
   DebugMode,
   PG_SHAPE_INDEX,
-  INK_BLEND_INDEX,
   PgConfig,
   SURFACE_METALLIC,
 } from './params'
@@ -87,9 +82,20 @@ const MAX_INT = 4
  *  surface return *exactly* to the seed-defined state. */
 const CULL = 0.01
 
-/** Cap on catch-up steps per frame, so returning from a long pause cannot burst
- *  hundreds of them at once. */
-const SIM_MAX_STEPS = 8
+/** Longest stretch of real time the medium will try to catch up on. Returning
+ *  from a long pause discards the rest rather than bursting hundreds of steps. */
+const SIM_MAX_CATCHUP = 0.05
+
+/** Cap on catch-up steps per frame.
+ *
+ *  Must be at least SIM_MAX_CATCHUP / smallest dt, or the clamp binds before the
+ *  catch-up window does and the medium silently runs in slow motion against the
+ *  wall clock — the frame rate dips, and the waves slow down with it instead of
+ *  staying on the clock. The smallest dt is at a 640 lattice, lowest Density and
+ *  highest Vibration: 1.4/434 = 3.2ms, so 0.05/0.0032 = 16 steps.
+ *
+ *  It was 8, which covered less than half of that window. */
+const SIM_MAX_STEPS = 16
 
 interface Ripple {
   alive: boolean
@@ -135,7 +141,9 @@ export class PlaygroundRenderer {
    *  texture feedback loop GL forbids — it needed three. */
   private mCur = 0
   private mediumReady = false
-  /** current lattice pitch; changes with quality, which recreates the targets */
+  /** rolling window of recent frame times, ms — feeds the frameMs readout */
+  private frameSamples: number[] = []
+  /** current lattice pitch; changing it recreates the targets */
   private mSize = MEDIUM_BASE_SIZE
   private quality = 'auto'
   private displaySize = 500
@@ -174,7 +182,6 @@ export class PlaygroundRenderer {
   private audio: AudioFeatures = SILENT
   private audioSource: { read(dt: number): AudioFeatures } | null = null
   private onsetTarget = 0
-  private throttle = 0
 
   // scratch, reused every frame — the loop must not allocate
   private srcA = new Float32Array(MAX_SRC * 4)
@@ -186,7 +193,6 @@ export class PlaygroundRenderer {
   private int1 = new Float32Array(MAX_INT * 4)
   private driveBuf = new Float32Array(MAX_SRC * 4)
   private mImp = new Float32Array(MAX_INT * 4)
-  private rampLab = new Float32Array(4 * 3)
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas
@@ -322,27 +328,49 @@ export class PlaygroundRenderer {
     this.wake()
   }
 
-  /** Quality controls two things: how finely the medium is resolved, and how far
-   *  the art pass supersamples. The medium's *physics* is unchanged — the
-   *  timestep scales with the lattice pitch to hold the Courant number, so
-   *  frequencies and wavelengths stay identical across settings. */
+  /** Quality is now only how far the art pass supersamples. Lattice pitch moved
+   *  to setLattice — they are separate costs and deserve separate controls. */
   setQuality(q: string) {
     if (q === this.quality) return
     this.quality = q
-    const want = QUALITY_LATTICE[q] ?? MEDIUM_BASE_SIZE
-    if (this.mediumReady && want !== this.mSize) {
-      const gl = this.gl
-      this.mFbo.forEach((f) => gl.deleteFramebuffer(f))
-      this.mTex.forEach((t) => gl.deleteTexture(t))
-      this.mFbo = []
-      this.mTex = []
-      this.mSize = want
-      // The lattice starts cold; the taps drive it back up.
-      this.mediumReady = this.allocMedium()
-      this.mWarm = false
-    }
     this.applyRenderSize()
     this.wake()
+  }
+
+  /** Lattice pitch: how finely the medium's physics is resolved.
+   *
+   *  The *physics* is unchanged by this — the timestep scales with the pitch to
+   *  hold the Courant number, so frequencies and wavelengths in field units stay
+   *  identical. What changes is the finest detail the lattice can carry, and the
+   *  cost, which goes as size^3.
+   *
+   *  Reallocating drops the field, so the lattice restarts cold and the taps
+   *  drive it back up. That is a visible re-warm of a few hundred steps, which is
+   *  why this is a deliberate control rather than something adjusted per frame. */
+  setLattice(size: number) {
+    const want = Math.max(64, Math.round(size))
+    if (!this.mediumReady || want === this.mSize) {
+      this.mSize = want
+      return
+    }
+    const gl = this.gl
+    this.mFbo.forEach((f) => gl.deleteFramebuffer(f))
+    this.mTex.forEach((t) => gl.deleteTexture(t))
+    this.mFbo = []
+    this.mTex = []
+    this.mSize = want
+    this.mediumReady = this.allocMedium()
+    this.mWarm = false
+    this.wake()
+  }
+
+  /** Rolling median frame time in ms, or 0 before enough samples. Median rather
+   *  than mean so one hitch — a GC pause, a tab switch — does not dominate the
+   *  reading the user is trying to tune against. */
+  get frameMs(): number {
+    if (this.frameSamples.length < 12) return 0
+    const s = [...this.frameSamples].sort((a, b) => a - b)
+    return s[s.length >> 1]
   }
 
   /** Displayed size in CSS pixels. The internal resolution follows from it and
@@ -499,6 +527,17 @@ export class PlaygroundRenderer {
     return this.reduced ? 0 : IDLE_MOTION
   }
 
+  /** Timestep for the config currently loaded. Both the stepper and the frame
+   *  loop go through here so they can never disagree about how much time a step
+   *  represents — if they did, the medium would run fast or slow against the
+   *  wall clock. */
+  private simDt() {
+    const cfg = this.cfg!
+    const voiced = this.audio.pitch > 0 && this.audio.clarity > 0.2
+    const w0 = voiced ? pitchToOmega0(this.audio.pitch) : vibrationToOmega0(cfg.vibration)
+    return mediumDt(this.mSize, densityToWaveSpeed(cfg.density), w0)
+  }
+
   private get mediumActive() {
     return this.cfg?.engine === 'medium' && this.mediumReady
   }
@@ -521,16 +560,30 @@ export class PlaygroundRenderer {
     gl.uniform1i(this.mu('uState'), 0)
 
     gl.uniform2f(this.mu('uTexel'), 1 / this.mSize, 1 / this.mSize)
-    const dt = mediumDt(this.mSize)
-    gl.uniform1f(this.mu('uDt'), dt)
     // c^2/h^2, so the shader's raw five-point stencil is already the Laplacian
     const c = densityToWaveSpeed(cfg.density)
     const h = MEDIUM_DOMAIN / this.mSize
     gl.uniform1f(this.mu('uC2H2'), (c * c) / (h * h))
+
+    // Solved from the stiffness actually in force, so no combination of Density,
+    // Vibration and lattice pitch can cross the stability limit. Must match
+    // frame()'s sdt exactly — both derive it from the same config.
+    const dt = this.simDt()
+    gl.uniform1f(this.mu('uDt'), dt)
+
     // A reflective boundary needs a low-loss medium or nothing survives the round
-    // trip and the toggle appears to do nothing.
-    const gamma = viscosityToGamma(cfg.viscosity) * (cfg.reflect ? REFLECT_DAMPING : 1)
+    // trip and the toggle appears to do nothing. Density contributes drag of its
+    // own: a heavy liquid dissipates faster, which is what makes it read as thick
+    // rather than merely slow.
+    const gamma =
+      (viscosityToGamma(cfg.viscosity) + densityToDrag(cfg.density)) *
+      (cfg.reflect ? REFLECT_DAMPING : 1)
     gl.uniform1f(this.mu('uGamma'), gamma)
+    // Viscous smoothing removes grid-scale chop, which no boundary can reach —
+    // those modes have zero group velocity and never travel. Explicit, so it is
+    // clamped against the timestep: dt*rate must stay under 2 for stability, and
+    // 0.8 leaves margin.
+    gl.uniform1f(this.mu('uNuH2'), Math.min(MEDIUM_NU_H2, 0.8 / dt / (Math.PI * Math.PI)))
     const tapAcc = MEDIUM_TAP_ACC
     // Reflection just switches the absorbing layer off — a free boundary is what
     // the lattice does naturally; the sponge is what suppresses it.
@@ -620,7 +673,8 @@ export class PlaygroundRenderer {
 
   private frame() {
     const now = performance.now()
-    const dt = Math.min((now - this.last) / 1000, 0.05)
+    const raw = now - this.last
+    const dt = Math.min(raw / 1000, 0.05)
     this.last = now
     this.clock += dt
 
@@ -647,12 +701,20 @@ export class PlaygroundRenderer {
     const live = this.liveRipples
     const quiet = this.audio.volume < 0.01
 
-    // A still avatar with nothing happening does not need 60fps.
-    if (live === 0 && quiet && !this.pointer.active && now - this.pointer.lastMove > 4000) {
-      this.throttle += dt
-      if (this.throttle < 1 / 30) return
-    }
-    this.throttle = 0
+    // There used to be an idle throttle here: after four seconds without pointer
+    // movement the loop dropped to 30fps, on the reasoning that a still avatar
+    // does not need 60. But this avatar is never still — the origins tap the
+    // medium continuously and idle drift runs regardless — so all it did was make
+    // the motion visibly halve in smoothness a few seconds after you stopped
+    // touching it. Constant cadence matters more here than the saved frames.
+    //
+    // Nothing is left running that shouldn't be: the loop still parks entirely
+    // below, once there is genuinely nothing left to settle.
+
+    // Raw rather than the clamped dt, or anything past 50ms would read as
+    // exactly 50ms.
+    this.frameSamples.push(raw)
+    if (this.frameSamples.length > 90) this.frameSamples.shift()
 
     this.waveTime += dt * (this.motion + this.audio.mid * 1.6)
 
@@ -664,8 +726,8 @@ export class PlaygroundRenderer {
         for (let i = 0; i < 700; i++) this.stepMedium()
         this.mWarm = true
       }
-      const sdt = mediumDt(this.mSize)
-      this.simAccum = Math.min(this.simAccum + dt, 0.05)
+      const sdt = this.simDt()
+      this.simAccum = Math.min(this.simAccum + dt, SIM_MAX_CATCHUP)
       let steps = Math.min(Math.floor(this.simAccum / sdt), SIM_MAX_STEPS)
       this.simAccum -= steps * sdt
       while (steps-- > 0) this.stepMedium()
@@ -740,39 +802,8 @@ export class PlaygroundRenderer {
 
     // --- engine -------------------------------------------------------------
     const useMedium = this.mediumActive
-    const engineIndex =
-      cfg.engine === 'heatmap' ? 3 : cfg.engine === 'ink' ? 2 : useMedium ? 1 : 0
-    gl.uniform1i(u('uEngine'), engineIndex)
+    gl.uniform1i(u('uEngine'), useMedium ? 1 : 0)
 
-    // --- heatmap ramp -------------------------------------------------------
-    // Sorted by lightness so the scale reads as a monotone heat scale rather than
-    // as arbitrary bands. Sorting here rather than reordering the mesh upload
-    // keeps each colour on its own attractor in the material views.
-    const ramp = cfg.colors
-      .slice(0, 4)
-      .map((c) => hexToOklab(c))
-      .sort((a, b) => a[0] - b[0])
-    for (let i = 0; i < ramp.length; i++) {
-      this.rampLab[i * 3] = ramp[i][0]
-      this.rampLab[i * 3 + 1] = ramp[i][1]
-      this.rampLab[i * 3 + 2] = ramp[i][2]
-    }
-    gl.uniform1i(u('uRampCount'), ramp.length)
-    gl.uniform3fv(u('uRampLab'), this.rampLab)
-
-    // --- ink engine ---------------------------------------------------------
-    // Split is a fraction of one fringe spacing, so it never exceeds a whole
-    // cell and flood the paper at high density.
-    gl.uniform1f(u('uStroke'), thicknessToStroke(cfg.thickness))
-    gl.uniform1i(u('uInkLayers'), chromaticToInkLayers(cfg.chromatic))
-    gl.uniform1f(
-      u('uInkSplit'),
-      (chromaticToInkSplit(cfg.chromatic) * Math.PI * 2) / freq
-    )
-    gl.uniform1f(u('uInkHue'), chromaticToInkHue(cfg.chromatic))
-    gl.uniform1f(u('uInkGlow'), chromaticToInkGlow(cfg.chromatic))
-    gl.uniform1f(u('uInkRot'), d.inkRot)
-    gl.uniform1i(u('uInkBlend'), INK_BLEND_INDEX[cfg.inkBlend])
     if (useMedium) {
       gl.activeTexture(gl.TEXTURE0)
       gl.bindTexture(gl.TEXTURE_2D, this.mTex[this.mCur])
@@ -846,7 +877,7 @@ export class PlaygroundRenderer {
     gl.uniform3fv(u('uMeshLab'), this.meshLab)
     gl.uniform4fv(u('uMeshPos'), this.meshPos)
 
-    const base = baseTone(cfg.colors, cfg.darkBase, cfg.engine === 'ink')
+    const base = baseTone(cfg.colors, cfg.darkBase)
     gl.uniform3f(u('uNeutralLab'), base.neutral[0], base.neutral[1], base.neutral[2])
     const matte = oklabToRgb(base.matte)
     gl.uniform3f(u('uMatte'), matte[0], matte[1], matte[2])
@@ -865,6 +896,20 @@ export class PlaygroundRenderer {
     gl.uniform1f(u('uSpecular'), d.specular)
 
     gl.uniform1f(u('uChromatic'), chromaticToOffset(cfg.chromatic))
+
+    // --- material optics ----------------------------------------------------
+    // Gated rather than just left at zero: the switch is the look, the slider is
+    // how much of it. Turning the film off has to silence it whatever the
+    // strength happens to be sitting at.
+    gl.uniform1f(u('uIridescence'), cfg.oilFilm ? cfg.iridescence : 0)
+    gl.uniform1f(u('uTranslucency'), cfg.translucency)
+    gl.uniform1f(u('uAnisotropy'), cfg.anisotropy)
+    gl.uniform2f(
+      u('uAnisoDir'),
+      Math.cos(cfg.anisotropyAngle),
+      Math.sin(cfg.anisotropyAngle)
+    )
+    gl.uniform1f(u('uGranularity'), cfg.granularity)
     gl.uniform1f(u('uExposure'), d.exposure)
     gl.uniform1f(u('uContrast'), d.contrast)
 

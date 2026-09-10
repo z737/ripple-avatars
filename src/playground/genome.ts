@@ -329,7 +329,6 @@ function candidate(seed: string, tag: string, opt: Options): PgConfig {
     // frame, which is a deliberate look rather than a sensible default.
     reflect: false,
     viscosity: r.range(0.06, 0.3),
-    inkBlend: r.bool(0.7) ? ('add' as const) : r.bool(0.6) ? ('opaque' as const) : ('multiply' as const),
     surface: r.bool(0.72) ? ('glossy' as const) : r.bool(0.6) ? ('matte' as const) : ('chrome' as const),
 
     // Each extra source multiplies into the moiré term, and a product's spatial
@@ -350,6 +349,21 @@ function candidate(seed: string, tag: string, opt: Options): PgConfig {
     chromatic: r.range(0.22, 0.58),
     grain: r.range(0.2, 0.5),
     interaction: r.range(0.4, 0.75),
+
+    // The optical levers stay mostly off in a random avatar. Each is a strong,
+    // recognisable look, and a random draw across all three at once reads as a
+    // stack of effects rather than as one surface — so they are occasional
+    // rather than continuous, and meant to be turned up deliberately.
+    //
+    // Oil film is off by default and carries a usable strength underneath, so
+    // flipping the switch shows something immediately instead of revealing a
+    // slider that also has to be found and raised.
+    oilFilm: false,
+    iridescence: r.range(0.55, 0.9),
+    translucency: r.range(0, 0.3),
+    anisotropy: r.bool(0.18) ? r.range(0.35, 0.75) : 0,
+    anisotropyAngle: r.range(0, TAU),
+    granularity: r.bool(0.3) ? r.range(0.1, 0.35) : 0,
 
     lightAngle: r.range(0, TAU),
     stretch: {

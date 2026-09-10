@@ -21,7 +21,7 @@ routing, no router dependency (`src/Router.tsx`); versions are declared once in
 | Route | Version | Purpose |
 | --- | --- | --- |
 | `#/v1` | Isoline avatars | the original seeded generator and contact sheet |
-| `#/v2` | Chromatic ripple | **default.** 500×500 surface: four render engines, draggable origins, pointer and mic interaction |
+| `#/v2` | Chromatic ripple | **default.** 500×500 surface: analytic and medium engines, draggable origins, pointer and mic interaction |
 
 Landing without a version normalises the URL to `#/v2` via `replaceState`, so the
 address bar always names what is on screen without adding a history entry.

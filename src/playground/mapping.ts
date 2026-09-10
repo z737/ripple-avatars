@@ -155,25 +155,92 @@ export const MEDIUM_ABSORB_WIDTH = MEDIUM_MARGIN / MEDIUM_DOMAIN
  *  at group velocity loses several e-foldings before touching the edge. */
 export const MEDIUM_ABSORB_GAMMA = 14
 
+/** Damping rate applied to the shortest wave the lattice can hold, 1/s.
+ *
+ *  The medium silted up: over tens of seconds the frame filled with fine
+ *  criss-cross chop until no long waves were visible. Neither existing loss term
+ *  could remove it. Bulk gamma decays every wavelength at the same rate, and the
+ *  absorbing margin only catches waves that travel to it — but on a discrete
+ *  lattice the group velocity is |sin(k h)|/(k h), which is exactly zero at the
+ *  two-texel wavelength. Grid-scale modes stand still. The taps inject a little
+ *  of them every strike, nothing took it away, and it built up.
+ *
+ *  Viscosity damps at nu*k^2, so pinning the rate at the lattice's largest k
+ *  (pi/h) states the intent directly.
+ *
+ *  The size is set by where the viscous rate crosses bulk gamma, since that is
+ *  the wavelength below which this term takes over: 4R/lambda^2 = gamma, so
+ *  lambda = sqrt(4R/gamma). The chop to remove is 2 to 4 texels; the ripple
+ *  ridges worth keeping start around 10. At R = 18 against a mid gamma of ~0.9
+ *  the crossover lands at 9 texels, right in the gap — a 3-texel wave is damped
+ *  at 8/s and gone in a tenth of a second, while a 20-texel one loses 0.18/s,
+ *  five times under bulk damping and therefore untouched.
+ *
+ *  60 was the first attempt and was too strong: it put the crossover at 16
+ *  texels and visibly flattened the surface along with the chop. */
+export const MEDIUM_NYQUIST_DAMPING = 18
+
+/** Kelvin-Voigt viscosity divided by h^2, which is what the shader wants since
+ *  its stencil is the raw five-point sum.
+ *
+ *  nu = R*h^2/pi^2 makes nu*k^2 equal R at k = pi/h, so this reduces to a
+ *  constant — the smoothing is then identical at every lattice pitch instead of
+ *  changing strength with the quality setting.
+ *
+ *  The term is explicit, so it needs dt*R < 2 to stay stable; the caller clamps
+ *  against the timestep in force. */
+export const MEDIUM_NU_H2 = MEDIUM_NYQUIST_DAMPING / (Math.PI * Math.PI)
+
 /** Lattice pitch the medium was calibrated at. */
 export const MEDIUM_BASE_SIZE = 384
 
-/** Simulation timestep, in seconds — derived from the lattice pitch rather than
- *  fixed.
+/** Target for dt*omega at the lattice's stiffest mode.
  *
- *  A finer lattice has a tighter CFL limit, so raising resolution with a fixed dt
- *  would go unstable at the top of the wave-speed range. Scaling dt with the
- *  pitch keeps the Courant number — and therefore the physics, the frequencies
- *  and the wavelengths — identical at every quality setting. Quality then changes
- *  how finely the medium is resolved, not how it behaves. */
-export const mediumDt = (latticeSize: number) =>
-  (0.7 * (MEDIUM_DOMAIN / latticeSize)) / MAX_WAVE_SPEED
+ *  Semi-implicit Euler on u'' = -omega^2 u is stable only while dt*omega < 2, and
+ *  the stiffest mode on a five-point stencil is the CHECKERBOARD k = (pi/h, pi/h),
+ *  where omega^2 = 8c^2/h^2 + omega0^2.
+ *
+ *  The old fixed Courant factor of 0.7 put that product at 2*sqrt(2)*0.7 = 1.980
+ *  — a 1% margin — and at a 256 lattice with high Vibration the omega0 term tipped
+ *  it past 2.0 outright. Past the limit that one mode grows every step until it
+ *  saturates the state clamp, which is the pixel checkerboard that appeared at low
+ *  Density. 1.4 leaves a 30% margin instead. */
+export const MEDIUM_COURANT = 1.4
 
-/** Top of the Density range; the CFL bound above is derived from it. */
-export const MAX_WAVE_SPEED = 0.95
+/** Simulation timestep, in seconds.
+ *
+ *  Solved from the *actual* stiffness rather than assumed from the worst case:
+ *  dt = COURANT / omega_max, with omega_max measured at the checkerboard mode for
+ *  the wave speed and natural frequency currently in force. Three things follow.
+ *
+ *  It cannot go unstable — the bound is the thing being solved for, so every
+ *  combination of Density, Vibration and lattice pitch is safe by construction
+ *  rather than by a constant that happened to be small enough.
+ *
+ *  It is cheaper where it can afford to be. A thick, slow medium is not stiff, so
+ *  it takes far larger steps: at full Density the timestep is about 3x the old
+ *  one, which is most of what makes the heavy end light to run.
+ *
+ *  And the physics is unchanged by any of it. dt is in real seconds and every
+ *  term is a rate, so step size affects accuracy and cost, never the frequencies
+ *  or wavelengths that come out. */
+export const mediumDt = (latticeSize: number, waveSpeed: number, omega0: number) => {
+  const h = MEDIUM_DOMAIN / latticeSize
+  const omegaMax = Math.sqrt((8 * waveSpeed * waveSpeed) / (h * h) + omega0 * omega0)
+  return MEDIUM_COURANT / Math.max(omegaMax, 1e-6)
+}
+
+/** Top of the Density range, UV per second.
+ *
+ *  Lowered from 0.95. That was fast enough to read as agitated rather than
+ *  soothing, and it was also the value the old fixed timestep was calibrated
+ *  against, so it set the stability margin for every other setting too. */
+export const MAX_WAVE_SPEED = 0.62
 
 /** Lattice pitch per quality. Costs rise as size^2 * (1/dt), so ultra is roughly
  *  4.6x the work of auto — which is why it is opt-in. */
+/** @deprecated Lattice pitch is now its own control — see LATTICE_SIZE in
+ *  params.ts. Kept only so nothing silently reads a stale coupling. */
 export const QUALITY_LATTICE: Record<string, number> = {
   auto: 384,
   high: 512,
@@ -191,13 +258,34 @@ export const QUALITY_RENDER_SCALE: Record<string, number> = {
   ultra: 3,
 }
 
-/** Wave speed, UV per second — the medium's stiffness, and what Density now
+/** Wave speed, UV per second — the medium's stiffness, and what Density
  *  controls. For a given drive frequency the wavelength is 2*pi*c/sqrt(w^2-w0^2),
- *  so a slower medium carries shorter waves.
+ *  so a slower medium carries shorter, tighter waves.
  *
- *  The ceiling is the CFL condition: dt*c/h must stay under 1/sqrt(2) for the
- *  2D five-point stencil, which at this dt and lattice pitch is ~1.1 UV/s. */
+ *  Read as thickness: turning Density up is pouring in more liquid. The medium
+ *  gets slower and heavier, its ripples shorter and more crowded, and it damps
+ *  harder — see densityToDrag, which moves with this. Turning it down thins the
+ *  medium out to something light and open.
+ *
+ *  The floor stays at 0.30. Dropping it to 0.16 to push "more liquid" further
+ *  emptied the frame instead: a wave travels v_g/gamma before it dies, so at 0.16
+ *  against a default gamma of ~0.9 that reach is 0.14 UV — a seventh of the
+ *  frame. The taps could no longer fill it and the surface went flat. No CFL
+ *  ceiling applies any more; mediumDt solves for the timestep from whatever speed
+ *  is set. */
 export const densityToWaveSpeed = (d: number) => lerp(MAX_WAVE_SPEED, 0.3, clamp01(d))
+
+/** Extra velocity damping contributed by Density, 1/s.
+ *
+ *  Thickness is not only slowness — a heavy liquid also dissipates faster, and
+ *  that is part of what separates heavy from merely slow.
+ *
+ *  Kept small on purpose. Damping is deliberately not amplitude-compensated (see
+ *  MEDIUM_GAMMA_REF below for why no scaling law can cancel it), so every unit
+ *  added here is level lost at the top of the range with no way to win it back.
+ *  0.9 was tried and took the surface to completely flat at full Density. 0.22
+ *  reads as thicker without emptying the frame. */
+export const densityToDrag = (d: number) => 0.22 * Math.pow(clamp01(d), 1.6)
 
 /** Velocity damping, 1/s.
  *

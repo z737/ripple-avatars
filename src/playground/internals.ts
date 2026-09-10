@@ -28,7 +28,6 @@ export interface Internals {
   freqPhase: [number, number]
   /** rotation of the ink gradient relative to the base one, so a stroke's hue
    *  differs from the paper it sits on instead of vanishing into it */
-  inkRot: number
 }
 
 export function internals(cfg: PgConfig): Internals {
@@ -51,6 +50,5 @@ export function internals(cfg: PgConfig): Internals {
     // field would read as grain rather than as structure.
     freqScale: r.range(4, 9),
     freqPhase: [r.range(0, 6.283), r.range(0, 6.283)],
-    inkRot: r.range(1.2, 5.1),
   }
 }

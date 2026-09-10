@@ -545,6 +545,15 @@ a.btn {
   transform: translateX(18px);
 }
 
+/* --- v3 shade strip ------------------------------------------------------- */
+.shade-chip {
+  flex: 1 0 0;
+  min-width: 0;
+  height: 18px;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid #00000012;
+}
+
 /* --- brand + version picker ----------------------------------------------- */
 .brand {
   display: flex;

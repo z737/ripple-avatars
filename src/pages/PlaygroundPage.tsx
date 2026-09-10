@@ -13,6 +13,7 @@ import {
 import { internals } from '../playground/internals'
 import { TIER_SIZE } from '../playground/gpu'
 import {
+  MEDIUM_DOMAIN,
   QUALITY_RENDER_SCALE,
   resonanceToSpread,
   vibrationToOmega0,
@@ -32,13 +33,15 @@ import {
   PG_SHAPES,
   PgConfig,
   PgRangeKey,
-  INK_BLENDS,
-  INK_BLEND_LABEL,
-  InkBlend,
   PgShape,
   Pattern,
   QUALITIES,
   QUALITY_LABEL,
+  LATTICES,
+  LATTICE_LABEL,
+  LATTICE_SIZE,
+  LATTICE_COST,
+  Lattice,
   Quality,
   SHAPE_LABEL,
   SURFACES,
@@ -94,6 +97,9 @@ export default function PlaygroundPage() {
   const [showDebug] = useState(wantsDebug)
   const [mediumAvailable, setMediumAvailable] = useState(true)
   const [quality, setQuality] = useState<Quality>('auto')
+  const [lattice, setLattice] = useState<Lattice>('normal')
+  /** measured frame time, so the lattice choice can be made against a number */
+  const [frameMs, setFrameMs] = useState(0)
   /** largest square the viewport allows; the size slider is capped by it */
   const [fitMax, setFitMax] = useState(CANVAS)
 
@@ -142,6 +148,17 @@ export default function PlaygroundPage() {
   useEffect(() => {
     rendererRef.current?.setQuality(quality)
   }, [quality])
+  useEffect(() => {
+    rendererRef.current?.setLattice(LATTICE_SIZE[lattice])
+  }, [lattice])
+
+  // Polled rather than pushed per frame: this is a readout, and re-rendering the
+  // whole panel 60 times a second to display it would itself cost more than the
+  // difference it is there to measure.
+  useEffect(() => {
+    const id = setInterval(() => setFrameMs(rendererRef.current?.frameMs ?? 0), 500)
+    return () => clearInterval(id)
+  }, [])
   useEffect(() => {
     rendererRef.current?.setDisplaySize(size)
   }, [size])
@@ -340,33 +357,6 @@ export default function PlaygroundPage() {
               labels={ENGINE_LABEL}
               onChange={(e: Engine) => set('engine', e)}
             />
-            {cfg.engine === 'heatmap' && (
-              <p className="t-xs-regular note">
-                False-colour of the signed height field: troughs at one end of the palette
-                ramp, crests at the other, the neutral plane in the middle. Inverted in
-                OKLab — lightness mirrored, chroma negated — so it reads as an instrument
-                rather than a material. Depth is measured off the field directly instead of
-                being inferred from how a light falls on it, so Light, Shadow and Wave depth
-                do nothing here.
-              </p>
-            )}
-            {cfg.engine === 'ink' && (
-              <>
-                <Segmented
-                  value={cfg.inkBlend}
-                  options={INK_BLENDS}
-                  labels={INK_BLEND_LABEL}
-                  onChange={(v: InkBlend) => set('inkBlend', v)}
-                />
-                <p className="t-xs-regular note">
-                  Ink draws the field's zero set as stroked contours instead of lighting a
-                  surface. Thickness is line weight; Chromatic sets how many strokes sit
-                  side by side and how far apart in the palette they sample — that offset is
-                  what puts a cyan stroke next to a magenta one. Wave depth, Light and
-                  Shadow do nothing here: there is no relief to describe.
-                </p>
-              </>
-            )}
             {cfg.engine === 'medium' && (
               <>
                 {slider('vibration')}
@@ -436,7 +426,7 @@ export default function PlaygroundPage() {
 
           <Section
             icon={Icons.color}
-            title="Material"
+            title="Pigment"
             supporting="One continuous mesh gradient. Chromatic refracts it at steep slopes only."
           >
             <Swatches
@@ -455,6 +445,50 @@ export default function PlaygroundPage() {
             {slider('mesh')}
             {slider('chromatic')}
             {slider('grain')}
+          </Section>
+
+          <hr className="panel-divider" />
+
+          <Section
+            icon={Icons.color}
+            title="Oil film"
+            supporting="A thin iridescent film over the surface. Hue comes from height, not pigment."
+          >
+            <Toggle
+              label="Oil film"
+              checked={cfg.oilFilm}
+              onChange={(v) => set('oilFilm', v)}
+            />
+            {cfg.oilFilm && slider('iridescence')}
+            <p className="t-xs-regular note">
+              Thin-film interference: the colour of a soap bubble or a slick on wet
+              tarmac, where hue is set by how thick the film is. Here that thickness is
+              the wave height, so the bands follow the surface instead of the palette.
+              Weighted toward grazing angles, so it rides on the surface as a reflection
+              would rather than staining the material underneath.
+            </p>
+          </Section>
+
+          <hr className="panel-divider" />
+
+          <Section
+            icon={Icons.motion}
+            title="Optics"
+            supporting="Two more ways a surface can behave toward light. Independent of the physics."
+          >
+            {slider('translucency')}
+            {slider('anisotropy')}
+            <AngleDial
+              label="Sheen direction"
+              value={cfg.anisotropyAngle}
+              onChange={(v) => set('anisotropyAngle', v)}
+            />
+            <p className="t-xs-regular note">
+              Translucency wraps the light around the terminator and lets thin, steep
+              parts glow from behind, which is the difference between wax and plastic.
+              Anisotropic sheen stretches the highlight along one axis, so it streaks like
+              brushed metal or satin rather than pooling in a dot.
+            </p>
           </Section>
 
           <hr className="panel-divider" />
@@ -487,7 +521,7 @@ export default function PlaygroundPage() {
           <Section
             icon={Icons.surface}
             title="Behaviour"
-            supporting="How the material carries a wave, and how it takes the light."
+            supporting="How the surface carries a wave, and how it takes the light."
           >
             <Segmented
               value={cfg.surface}
@@ -531,8 +565,44 @@ export default function PlaygroundPage() {
             />
             <p className="t-xs-regular note">
               {size} x {size} px shown, rendered at {renderedPx} x {renderedPx}. High and
-              Ultra supersample, which is what removes the stair-stepping on steep ridges;
-              Ultra also resolves the medium on a finer lattice.
+              Ultra supersample, which is what removes the stair-stepping on steep ridges.
+            </p>
+          </Section>
+
+          <hr className="panel-divider" />
+
+          <Section
+            icon={Icons.grid}
+            title="Lattice"
+            supporting="How finely the medium's physics is resolved. The steepest cost in the app."
+          >
+            <Segmented
+              value={lattice}
+              options={LATTICES}
+              labels={LATTICE_LABEL}
+              onChange={(l: Lattice) => setLattice(l)}
+            />
+            <p className="t-xs-regular note">
+              {cfg.engine === 'medium' ? (
+                <>
+                  {LATTICE_SIZE[lattice]} x {LATTICE_SIZE[lattice]} oscillators, so the
+                  visible frame is {Math.round(LATTICE_SIZE[lattice] / MEDIUM_DOMAIN)} across.{' '}
+                  {lattice === 'normal'
+                    ? 'The calibration point.'
+                    : `About ${LATTICE_COST[lattice]}x the work of 384 — cost goes as size cubed, since a finer lattice also needs proportionally more steps per second.`}{' '}
+                  Wavelengths do not change; the finest detail the medium can carry does.
+                  Switching restarts the field, so it re-warms for a moment.
+                  {frameMs > 0 && (
+                    <>
+                      {' '}
+                      Measured now: <strong>{frameMs.toFixed(1)} ms/frame</strong>,{' '}
+                      {(1000 / frameMs).toFixed(0)} fps.
+                    </>
+                  )}
+                </>
+              ) : (
+                'The lattice is the Medium engine’s simulation grid; switch the engine to Medium for this to take effect.'
+              )}
             </p>
           </Section>
 

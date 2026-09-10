@@ -22,12 +22,17 @@ export const VERSIONS = [
     label: 'v2',
     summary: 'Chromatic ripple',
   },
+  {
+    id: 'v3',
+    label: 'v3',
+    summary: 'Tile mark',
+  },
 ] as const
 
 export type VersionId = (typeof VERSIONS)[number]['id']
 
 /** What loads when someone arrives with no version in the URL. */
-export const DEFAULT_VERSION: VersionId = 'v2'
+export const DEFAULT_VERSION: VersionId = 'v3'
 
 export const versionRoute = (id: VersionId) => `#/${id}`
 

@@ -228,6 +228,149 @@ outside the visible area, dissipating waves before they arrive. The ramp is
 smoothstepped and squared because a *sharp* rise in damping is itself an
 impedance discontinuity and reflects nearly as much as the hard edge did.
 
+## Materials
+
+A material is a named point in the medium's parameter space plus the finish that
+goes with it — `src/playground/materials.ts`. Nine of them: Fluid, Water, Gel,
+Syrup, Sand, Metal, Silk, Oil film, Etched.
+
+`applyMaterial` moves only physics and finish. Seed, colours, origins, pattern,
+shape and the light rig are the *avatar* and survive untouched, so the picker
+reads as "same avatar, different substance". Re-seeding re-applies the current
+material afterwards, which keeps the two axes independent — rolling a new
+identity must not silently reset the substance.
+
+**Every material has to clear the visibility floor.** A wave travels `v_g/gamma`
+before it dies, so a material that is both slow and lossy can have a reach
+shorter than the frame and render as nothing at all. Syrup and Sand were first
+written at viscosity 0.92 and 1.0, which put both at 0.13 UV — a seventh of the
+frame — and both came out completely flat. Check the reach when adding one:
+
+```
+reach = densityToWaveSpeed(d) / (viscosityToGamma(v) + densityToDrag(d))
+```
+
+Under about 0.18 UV is dead. Sand and Syrup now sit near 0.25 — local, but
+legible.
+
+**Sand's ripples are relief, not waves.** Granular material damps so hard that
+nothing propagates, and its ripples are static bedforms shaped over hours
+anyway — so they come from `granularHeight` in the shader rather than from the
+medium. Two scales: a coarse octave stretched 4.5x along `uAnisoDir` for the
+dunes, a fine one for the grains. That also makes the look independent of where
+the seed happened to put the origins, which matters because at sand's reach an
+off-frame origin contributes nothing.
+
+Granularity is a property of the material, not a slider — it is what the surface
+is made of. Sand needs it, water must not have it.
+
+## Optics
+
+Three levers, live for every material, all pure shader work with no physics
+attached:
+
+**Iridescence** indexes a cosine palette by surface *height* — thin-film
+interference, so hue follows the waves instead of the pigment. Screen-blended
+over the shaded colour and weighted by fresnel, so it rides on the surface like
+a reflection rather than tinting the body.
+
+**Translucency** wraps the diffuse term around the terminator and adds a forward
+scatter on steep, thin areas. Wrapped diffuse is the standard cheap stand-in for
+subsurface scattering and is most of the difference between wax and plastic.
+
+**Anisotropic sheen** adds a Ward lobe with unequal roughness along and across
+the grain, on top of the isotropic term rather than replacing it — so a material
+with the slider at zero renders exactly as it did before the feature existed.
+
+Measured effect at full strength, mean absolute channel difference out of 255:
+iridescence and translucency 10.6, anisotropy 6.4. The first anisotropy attempt
+squashed the half-vector's across-grain component and fed it back into the Blinn
+exponent; it measured **0.4** — the squashed deviation exceeded 1 almost
+everywhere, the clamp took it to zero, and the control was removing the
+highlight rather than stretching it. Worth measuring a lever rather than
+eyeballing it, especially a subtle one.
+
+**The timestep is solved, not assumed.** Semi-implicit Euler on `u'' = -ω²u` is
+stable only while `dt·ω < 2`, and the stiffest mode on a five-point stencil is the
+checkerboard `k = (π/h, π/h)`, where `ω² = 8c²/h² + ω0²`. The old fixed Courant
+factor of 0.7 put that product at `2√2 · 0.7 = 1.980` — a 1% margin — and at a 256
+lattice with high Vibration the `ω0` term pushed it past 2.0 outright:
+
+```
+N=256  density=0  vib=1.0   dt·ω = 2.0071   UNSTABLE
+N=384  density=0  vib=0     dt·ω = 1.9801   1% margin
+```
+
+Past the limit that one mode grows every step until it saturates the state clamp,
+which is a pixel checkerboard filling the frame — the failure that showed up at
+low Density. `mediumDt` now solves `dt = 1.4 / ω_max` from the wave speed and
+natural frequency actually in force, so `dt·ω` is 1.4 everywhere by construction,
+a 30% margin at every combination of Density, Vibration and lattice pitch.
+
+It is also cheaper where it can afford to be — a thick, slow medium is not stiff,
+so it takes much larger steps:
+
+| density | wave speed | steps/sec at 384 |
+| --- | --- | --- |
+| 0 | 0.62 | 186 |
+| 0.5 | 0.39 | 118 |
+| 1.0 | 0.30 | 79 |
+
+**`SIM_MAX_STEPS` has to cover the catch-up window.** It was 8, against a window
+of 50ms and a smallest dt of 3.2ms — so at 16 steps' worth of backlog the clamp
+bound first and the medium silently ran in slow motion against the wall clock.
+Frame rate dipping made the waves themselves slow down. It is now 16, which is
+exactly `SIM_MAX_CATCHUP / min(dt)`; keep that relationship if either changes.
+
+**There is no idle throttle.** There used to be: after four seconds without
+pointer movement the loop dropped to 30fps, on the reasoning that a still avatar
+does not need 60. But this avatar is never still — the origins tap continuously
+and idle drift runs regardless — so it only made the motion visibly halve in
+smoothness a few seconds after you stopped touching it. The loop still parks
+completely once there is genuinely nothing left to settle.
+
+**Density reads as thickness.** More Density is more liquid: slower waves, shorter
+and more crowded, and slightly more drag. The drag is kept small on purpose —
+damping is deliberately not amplitude-compensated (see `MEDIUM_GAMMA_REF`), so
+every unit added is level lost with no way to win it back. 0.9 was tried and took
+the surface to completely flat at full Density, because a wave travels `v_g/gamma`
+before it dies and that reach fell to a seventh of the frame. 0.22 reads as
+thicker without emptying it. For the same reason the wave-speed floor stays at
+0.30 rather than the 0.16 first tried.
+
+**Lattice pitch is its own control**, separate from Quality. They are independent
+costs: Quality supersamples the *image*, Lattice resolves the *physics*. A coarse
+lattice at high supersampling is a legitimate choice, and so is the reverse.
+
+Cost goes as **size³**, not size²: there are size² texels, and the step *rate*
+also scales with size because `dt` shrinks with the pitch to hold the Courant
+number. So 640 is 4.6× the work of 384 and 256 is under a third of it — much the
+steepest curve in the app, which is why it is worth exposing.
+
+Wavelengths in field units do not change with pitch; what changes is the finest
+detail the medium can carry. Measured across the tiers on one seed, in the same
+three bands as the viscosity table above:
+
+| band | 256 | 640 |
+| --- | --- | --- |
+| chop | 5.5 | 11.6 |
+| mid detail | 12.9 | **26.7** |
+| long waves | 11.2 | 12.9 |
+
+Mid detail roughly doubles while the composition holds — the avatar stays the
+same avatar, drawn with more or less resolution. Lattice is deliberately **not**
+part of `PgConfig`: it is a performance preference, and the same seed has to give
+the same avatar on a phone and a workstation.
+
+Changing pitch reallocates the targets, so the field restarts cold and re-warms
+over a few hundred steps. That is why it is a deliberate control rather than
+something adjusted per frame.
+
+The panel also shows a **measured median frame time**, so the trade can be made
+against a number rather than by feel. Median over a 90-frame window, sampled only
+on frames that did work — the idle throttle returns before the sample point, so a
+parked scene never reads as a slow one.
+
 The margin sits **outside** the −0.5…1.5 origin range, not inside it — origins
 are allowed out to those limits, and a sponge overlapping them would quietly damp
 an off-frame origin to silence, losing the long arcs those positions exist to
@@ -237,6 +380,44 @@ Measured after the change: a single tap decays 88% over 4.4s with no returning
 energy, amplitude at the true boundary is 8% of the in-frame amplitude, and the
 tap force needed raising 2.4x — the reflections had been recycling energy back
 through the frame and quietly inflating the steady amplitude.
+
+The layer damps the **displacement as well as the velocity**. Damping `v` alone
+changes how lossy the region is but leaves its impedance `sqrt(stiffness/density)`
+unchanged, and impedance is what a wave reflects off — so a velocity-only sponge
+still returned a share of every wave. Bleeding `u` toward zero on the same
+squared ramp makes the region genuinely open.
+
+**Viscosity is what removes small waves.** After a minute or two the frame used to
+silt up with fine criss-cross chop until no long waves were visible. Neither loss
+term above could remove it, and the reason is worth stating because it is
+counter-intuitive: on a discrete lattice the group velocity is `|sin(kh)|/(kh)`,
+which is **exactly zero at the two-texel wavelength**. Grid-scale modes do not
+propagate. They never travel to the absorbing margin, so no boundary — however
+perfect — can reach them. Meanwhile bulk `gamma` decays every wavelength at the
+same rate, so nothing preferred long waves over short ones. Each tap injected a
+little grid-scale energy, nothing took it away, and it accumulated.
+
+The fix is a Kelvin–Voigt term, `nu * laplacian(v)`, which damps at `nu*k^2` — the
+cost of being short is quadratic. It is free: state is `(u, v)` in `rg`, so the
+velocity Laplacian comes from the four fetches the position Laplacian already
+needed.
+
+`MEDIUM_NYQUIST_DAMPING` is pinned at the lattice's largest `k`, so the smoothing
+is identical at every quality tier. Its size is set by where the viscous rate
+crosses bulk gamma — `lambda = sqrt(4R/gamma)`, the wavelength below which this
+term takes over. At R = 18 against a mid gamma that lands at 9 texels: chop is 2–4
+texels, ridges worth keeping start around 10. Measured over a matched 100s run,
+in three spatial bands:
+
+| band | R = 0 | R = 18 |
+| --- | --- | --- |
+| chop, under 4.6 texels | 35.8 | **7.2** |
+| mid, 4.6–28 texels | 20.2 | 16.1 |
+| long, over 28 texels | 11.2 | **11.7** |
+
+Chop down 80%, long waves unchanged. R = 60 was the first attempt and was too
+strong — it put the crossover at 16 texels and flattened the surface along with
+the chop, costing 39% of the coarse structure for no further chop reduction.
 
 ### Voice
 

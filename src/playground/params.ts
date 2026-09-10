@@ -19,28 +19,12 @@
  *  its own natural frequency and rings, ripples spread by propagation, and
  *  several disturbances genuinely interfere because they share one medium. This
  *  is a prototype, kept side by side with the analytic engine for comparison. */
-export const ENGINES = ['analytic', 'medium', 'ink', 'heatmap'] as const
+export const ENGINES = ['analytic', 'medium'] as const
 export type Engine = (typeof ENGINES)[number]
 
 export const ENGINE_LABEL: Record<Engine, string> = {
   analytic: 'Analytic',
   medium: 'Medium',
-  ink: 'Ink',
-  heatmap: 'Heat',
-}
-
-/** How overlapping strokes combine. */
-export const INK_BLENDS = ['add', 'opaque', 'multiply'] as const
-export type InkBlend = (typeof INK_BLENDS)[number]
-export const INK_BLEND_LABEL: Record<InkBlend, string> = {
-  add: 'Add',
-  opaque: 'Opaque',
-  multiply: 'Multiply',
-}
-export const INK_BLEND_INDEX: Record<InkBlend, number> = {
-  add: 0,
-  opaque: 1,
-  multiply: 2,
 }
 
 /** Surface material. Matte is pigment barely lit; Chrome is the opposite end —
@@ -67,6 +51,43 @@ export const QUALITY_LABEL: Record<Quality, string> = {
   auto: 'Auto',
   high: 'High',
   ultra: 'Ultra',
+}
+
+/** Medium lattice pitch — how finely the *physics* is resolved, as opposed to
+ *  Quality, which supersamples the *image*. Two independent costs, so they are
+ *  two controls: a coarse lattice at high supersampling is a legitimate choice
+ *  (smooth edges, simpler waves) and so is the reverse.
+ *
+ *  This is the steepest cost curve in the app. Work scales as size^3, not
+ *  size^2: there are size^2 texels, and the step *rate* also scales with size
+ *  because dt shrinks with the lattice pitch to hold the Courant number. So 640
+ *  is 4.6x the work of 384, while 256 is under a third of it.
+ *
+ *  Not part of PgConfig, and deliberately so — it is a performance preference,
+ *  not part of the avatar. The same seed must give the same avatar on a phone
+ *  and a workstation. */
+export const LATTICES = ['coarse', 'normal', 'fine', 'ultra'] as const
+export type Lattice = (typeof LATTICES)[number]
+export const LATTICE_SIZE: Record<Lattice, number> = {
+  coarse: 256,
+  normal: 384,
+  fine: 512,
+  ultra: 640,
+}
+/** Labelled by the actual pitch: this is a performance control, and the number
+ *  is the thing being traded. */
+export const LATTICE_LABEL: Record<Lattice, string> = {
+  coarse: '256',
+  normal: '384',
+  fine: '512',
+  ultra: '640',
+}
+/** Work relative to the 384 calibration point, from the size^3 model above. */
+export const LATTICE_COST: Record<Lattice, number> = {
+  coarse: 0.3,
+  normal: 1,
+  fine: 2.4,
+  ultra: 4.6,
 }
 
 export const PATTERNS = ['young', 'orbit', 'interference', 'cellular', 'tunnel', 'flow'] as const
@@ -201,8 +222,6 @@ export interface PgConfig {
   /** how quickly the medium dissipates: slippery water through to syrup */
   viscosity: number
   surface: Surface
-  /** how overlapping ink strokes combine (ink engine only) */
-  inkBlend: InkBlend
 
   /* --- exposed sliders, all 0..1 --- */
   density: number
@@ -217,6 +236,13 @@ export interface PgConfig {
   chromatic: number
   grain: number
   interaction: number
+  /** thin-film colour driven by surface height rather than position — oil
+   *  slick, soap film, anodised metal */
+  iridescence: number
+  /** light bleeding through and around the surface: wax, jade, gel */
+  translucency: number
+  /** stretches the specular highlight along one axis — brushed metal, satin */
+  anisotropy: number
 
   /* --- exposed, other --- */
   /** radians; direction the light comes from, in the plane of the canvas */
@@ -229,6 +255,18 @@ export interface PgConfig {
   /** ink base instead of paper */
   darkBase: boolean
   audio: boolean
+
+  /** thin-film interference on or off. Gates the Iridescence strength below —
+   *  a film either coats the surface or it does not, so the look reads as one
+   *  switch with an amount rather than as a slider that happens to start at
+   *  zero. */
+  oilFilm: boolean
+  /** static height detail the light catches: the difference between a smooth
+   *  surface and a granular one. Seeded rather than exposed — it is what the
+   *  surface is made of, not a look applied to it. */
+  granularity: number
+  /** direction the anisotropic highlight stretches, radians */
+  anisotropyAngle: number
 }
 
 /** Slider metadata for the panel. All normalised — see the note at the top. */
@@ -248,6 +286,9 @@ export const PG_RANGES = {
   chromatic: { label: 'Chromatic' },
   grain: { label: 'Grain' },
   interaction: { label: 'Interaction' },
+  iridescence: { label: 'Iridescence' },
+  translucency: { label: 'Translucency' },
+  anisotropy: { label: 'Anisotropic sheen' },
 } as const
 
 export type PgRangeKey = keyof typeof PG_RANGES

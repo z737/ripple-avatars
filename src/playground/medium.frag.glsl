@@ -43,6 +43,7 @@ uniform vec2  uTexel;
 uniform float uDt;           // seconds per step
 uniform float uC2H2;         // c^2 / h^2, so the raw 5-point stencil is enough
 uniform float uGamma;        // velocity damping, 1/s
+uniform float uNuH2;         // Kelvin-Voigt viscosity / h^2 — see below
 uniform vec2  uAbsorb;       // x: layer width in uv, y: extra damping at the edge
 uniform vec4  uOmega0;       // x centre rad/s, y spread rad/s, z unused, w map scale
 uniform vec2  uFreqPhase;
@@ -81,15 +82,33 @@ void main() {
   float u = st.x;
   float v = st.y;
 
-  float lap =
-      texture(uState, uv + vec2(uTexel.x, 0.0)).r
-    + texture(uState, uv - vec2(uTexel.x, 0.0)).r
-    + texture(uState, uv + vec2(0.0, uTexel.y)).r
-    + texture(uState, uv - vec2(0.0, uTexel.y)).r
-    - 4.0 * u;
+  // Both Laplacians from the same four fetches — state is (u, v) in rg, so the
+  // velocity Laplacian the viscous term needs is already in hand and costs no
+  // extra bandwidth.
+  vec2 nx1 = texture(uState, uv + vec2(uTexel.x, 0.0)).rg;
+  vec2 nx0 = texture(uState, uv - vec2(uTexel.x, 0.0)).rg;
+  vec2 ny1 = texture(uState, uv + vec2(0.0, uTexel.y)).rg;
+  vec2 ny0 = texture(uState, uv - vec2(0.0, uTexel.y)).rg;
+
+  vec2 lap = nx1 + nx0 + ny1 + ny0 - 4.0 * st;
 
   float w0 = omega0(uv);
-  float acc = uC2H2 * lap - w0 * w0 * u;
+  float acc = uC2H2 * lap.x - w0 * w0 * u;
+
+  // --- viscosity: the term that removes small waves ------------------------
+  // Kelvin-Voigt internal friction, nu * laplacian(v). It damps a mode at a rate
+  // nu*k^2, so the cost of being short is quadratic: the intended waves are
+  // untouched while grid-scale chop dies almost immediately.
+  //
+  // Bulk damping alone cannot do this — exp(-gamma*dt) on the velocity decays
+  // every wavelength at the same rate, so nothing in the equation preferred long
+  // waves over short ones. And the absorbing boundary cannot do it either: on a
+  // discrete lattice the group velocity is |sin(k h)|/(k h), which is exactly
+  // ZERO at the two-texel wavelength. Grid-scale modes do not propagate, so they
+  // never reach the edge to be absorbed. They sat where the taps created them
+  // and accumulated, which is why the frame silted up with criss-cross chop over
+  // tens of seconds while the long waves kept flowing away normally.
+  acc += uNuH2 * lap.y;
 
   // --- forcing -------------------------------------------------------------
   // The origins *tap* the surface rather than holding it at a frequency. This is
@@ -139,6 +158,15 @@ void main() {
   // unconditionally stable for any g, which is what lets the sponge be strong.
   v = (v + acc * uDt) * exp(-gamma * uDt);
   u = u + v * uDt;
+
+  // The layer has to swallow the displacement too, not just the velocity.
+  // Damping v alone changes how lossy the region is but leaves its impedance
+  // sqrt(stiffness/density) unchanged, and it is the impedance step a wave
+  // reflects off — so a velocity-only sponge still sent a share of every wave
+  // back through the frame. Bleeding u toward zero on the same squared ramp
+  // makes the region genuinely open: the wave runs out into it and does not
+  // come back.
+  u *= exp(-uAbsorb.y * 0.5 * sponge * sponge * uDt);
 
   fragColor = vec4(clamp(u, -8.0, 8.0), clamp(v, -400.0, 400.0), 0.0, 1.0);
 }
