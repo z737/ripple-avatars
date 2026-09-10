@@ -15,12 +15,25 @@ export const GRID = 4
 export const TILE_COUNT = GRID * GRID
 
 /** Square lays the 16 components on a 4x4 grid; Circle lays them in a polar
- *  arrangement of 1 + 5 + 10 that fills a disc. Both are always 16. */
-export const LAYOUTS = ['square', 'circle'] as const
+ *  arrangement of 1 + 5 + 10 that fills a disc; Abstract keeps the disc but
+ *  builds each of the 16 components out of many small squares on a fine grid.
+ *  All three are always 16 components. */
+export const LAYOUTS = ['square', 'circle', 'abstract'] as const
 export type Layout = (typeof LAYOUTS)[number]
 export const LAYOUT_LABEL: Record<Layout, string> = {
   square: 'Square',
   circle: 'Circle',
+  abstract: 'Abstract',
+}
+
+/** Cells per side for Abstract. Coarse reads chunky and hand-cut; fine reads
+ *  as smooth organic blobs. Powers of two only because nothing here needs the
+ *  steps between them. */
+export const ABSTRACT_GRIDS = [16, 32, 64] as const
+export const ABSTRACT_GRID_LABEL: Record<string, string> = {
+  '16': 'Coarse',
+  '32': 'Medium',
+  '64': 'Fine',
 }
 
 /** Components per ring, outward from the centre. Sums to TILE_COUNT.
@@ -80,6 +93,18 @@ export interface V3Config {
   /** how far apart two components fuse, as a fraction of a cell. 0 keeps them
    *  separate; higher lets them reach for each other and merge. */
   goo: number
+
+  // --- Abstract only ------------------------------------------------------
+  /** cells per side of the fine grid the blobs are cut from */
+  absGrid: number
+  /** fraction of the disc that gets filled; the rest is holes and gaps */
+  absDensity: number
+  /** chance that two components are allowed to touch and fuse. 0 leaves sixteen
+   *  islands; 1 welds the whole disc into one mass. */
+  absBond: number
+  /** one corner radius for every cell. Abstract has no per-corner logic — the
+   *  shape variety comes from how cells clump, not from their corners. */
+  absRadius: number
 }
 
 export const V3_RANGES = {
@@ -93,6 +118,9 @@ export const V3_RANGES = {
   spreadReach: { label: 'Falloff' },
   lift: { label: 'Lift' },
   goo: { label: 'Goo' },
+  absDensity: { label: 'Density' },
+  absBond: { label: 'Bonding' },
+  absRadius: { label: 'Corner' },
 } as const
 
 export type V3RangeKey = keyof typeof V3_RANGES

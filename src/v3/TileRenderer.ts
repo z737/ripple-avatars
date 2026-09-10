@@ -9,6 +9,7 @@
 
 import vertSrc from '../engine/ripple.vert.glsl?raw'
 import { prefersReducedMotion } from '../playground/gpu'
+import { AbstractMask, abstractFromSeed } from './abstract'
 import { GRID, RINGS, TILE_COUNT, V3Config, cellOf, polarCellOf } from './params'
 import fragSrc from './tiles.frag.glsl?raw'
 import { shadeRgb } from './shades'
@@ -49,6 +50,16 @@ export class TileRenderer {
 
   /** −1 when the pointer is outside the grid */
   private hovered = -1
+  /** Abstract drives its hover off the pointer *position*, not off which
+   *  component is under it, so the field can sit between two blobs and pull
+   *  them together. Kept after the pointer leaves so the goo springs down
+   *  where it was rather than snapping back to the origin. */
+  private ptr = { x: 0.5, y: 0.5 }
+  private ptrOn = false
+
+  private mask: AbstractMask | null = null
+  private maskKey = ''
+  private maskTex: WebGLTexture | null = null
 
   // spring state, per tile: current and velocity
   private pos = new Float32Array(TILE_COUNT * 2)
@@ -94,6 +105,53 @@ export class TileRenderer {
     this.prog = prog
     this.scale.fill(1)
     this.last = performance.now()
+
+    // NEAREST and no mips: an integer texture is not filterable, and a cell id
+    // has no meaningful interpolation anyway.
+    this.maskTex = gl.createTexture()
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTex)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    // A 1x1 placeholder, so the sampler is always backed even in the layouts
+    // that never read it.
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8UI, 1, 1, 0, gl.RG_INTEGER,
+      gl.UNSIGNED_BYTE, new Uint8Array([0, 0]))
+  }
+
+  /** Rebuild the abstract mask, but only when something it depends on moved —
+   *  growing 4096 cells on every slider tick would stutter the drag. */
+  private syncMask(cfg: V3Config) {
+    if (cfg.layout !== 'abstract') return
+    const key = [
+      cfg.seed,
+      cfg.absGrid,
+      cfg.absDensity.toFixed(3),
+      cfg.absBond.toFixed(3),
+    ].join('|')
+    if (key === this.maskKey && this.mask) return
+
+    this.maskKey = key
+    this.mask = abstractFromSeed(cfg.seed, {
+      grid: cfg.absGrid,
+      density: cfg.absDensity,
+      bond: cfg.absBond,
+    })
+
+    // Interleave component and cluster into one two-channel fetch, rather than
+    // paying a second texture lookup per cell per fragment for the group.
+    const n = this.mask.grid * this.mask.grid
+    const packed = new Uint8Array(n * 2)
+    for (let i = 0; i < n; i++) {
+      packed[i * 2] = this.mask.cells[i]
+      packed[i * 2 + 1] = this.mask.groups[i]
+    }
+
+    const gl = this.gl
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTex)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8UI, this.mask.grid, this.mask.grid, 0,
+      gl.RG_INTEGER, gl.UNSIGNED_BYTE, packed)
   }
 
   private u(name: string) {
@@ -107,6 +165,7 @@ export class TileRenderer {
 
   setConfig(cfg: V3Config) {
     this.cfg = cfg
+    this.syncMask(cfg)
     this.wake()
   }
 
@@ -126,15 +185,49 @@ export class TileRenderer {
   /** Pointer in canvas UV, y down. Pass null when it leaves. */
   setPointer(p: { x: number; y: number } | null) {
     const next = p ? this.tileAt(p) : -1
+    const abstract = this.cfg?.layout === 'abstract'
+
+    if (p) {
+      // Abstract follows the pointer continuously, so every move is a redraw;
+      // the other layouts only care when it crosses into another component.
+      if (abstract && (p.x !== this.ptr.x || p.y !== this.ptr.y)) {
+        this.ptr = { x: p.x, y: p.y }
+        this.wake()
+      }
+      const inside = p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1
+      if (inside !== this.ptrOn) {
+        this.ptrOn = inside
+        this.wake()
+      }
+    } else if (this.ptrOn) {
+      this.ptrOn = false
+      this.wake()
+    }
+
     if (next !== this.hovered) {
       this.hovered = next
       this.wake()
     }
   }
 
+  /** True while the interaction should be running. Abstract reacts anywhere on
+   *  the canvas — including over a gap between blobs, which is exactly where
+   *  the reach-out is most visible — so it cannot key off tileAt. */
+  private get hoverOn() {
+    return this.cfg?.layout === 'abstract' ? this.ptrOn : this.hovered >= 0
+  }
+
   /** Which component is under a UV point, ignoring the hover offsets. */
   tileAt(p: { x: number; y: number }): number {
     if (p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return -1
+
+    if (this.cfg?.layout === 'abstract') {
+      const m = this.mask
+      if (!m) return -1
+      const col = Math.min(m.grid - 1, Math.floor(p.x * m.grid))
+      const row = Math.min(m.grid - 1, Math.floor(p.y * m.grid))
+      return m.cells[row * m.grid + col] - 1
+    }
 
     if (this.cfg?.layout === 'circle') {
       const qx = p.x - 0.5
@@ -183,6 +276,7 @@ export class TileRenderer {
   dispose() {
     this.stop()
     this.gl.deleteProgram(this.prog)
+    if (this.maskTex) this.gl.deleteTexture(this.maskTex)
   }
 
   private frame() {
@@ -195,7 +289,7 @@ export class TileRenderer {
     // Nothing is animating and nothing is hovered: park the loop until the
     // pointer or a control wakes it. The mark is static by nature, so there is
     // no reason to hold a 60fps loop open on it.
-    if (settled && this.hovered < 0) this.stop()
+    if (settled && !this.hoverOn) this.stop()
   }
 
   /** Advance the springs. Returns true once everything is at rest. */
@@ -207,7 +301,7 @@ export class TileRenderer {
 
     // The goo itself springs in and out, so merging and separating are as smooth
     // as the movement that causes them.
-    const gooTarget = this.hovered >= 0 ? 1 : 0
+    const gooTarget = this.hoverOn ? 1 : 0
     if (this.reduced) {
       this.gooAmt = gooTarget
     } else {
@@ -218,6 +312,11 @@ export class TileRenderer {
         moving = true
       }
     }
+
+    // Abstract has nothing per-component to spring: its cells are fixed at grid
+    // positions in the mask, and the interaction is a field over the canvas
+    // rather than sixteen offsets. Only the goo amount moves.
+    if (cfg.layout === 'abstract') return !moving
 
     // Negative: components move *toward* the hovered one so their fields touch
     // and the smooth minimum fuses them. Pushing apart would separate the very
@@ -297,6 +396,7 @@ export class TileRenderer {
     // than growing the mark past its frame.
     const half = (cell * (1 - cfg.gutter)) / 2
     const circle = cfg.layout === 'circle'
+    const abstract = cfg.layout === 'abstract'
 
     for (let i = 0; i < TILE_COUNT; i++) {
       const o = i * 4
@@ -336,13 +436,64 @@ export class TileRenderer {
     gl.uniform4fv(this.u('uTile'), this.tileBuf)
     gl.uniform4fv(this.u('uRadii'), this.radiiBuf)
     gl.uniform3fv(this.u('uColor'), this.colorBuf)
-    gl.uniform1i(this.u('uSelected'), this.selected)
-    gl.uniform1i(this.u('uLayout'), circle ? 1 : 0)
-    // Goo in uv units, scaled by the *layout's own* component size — the disc's
-    // rings are narrower than a grid cell, so a single absolute radius that
-    // looks right on the grid fuses the whole disc into one blob.
-    const compSize = circle ? 0.5 / RINGS.length : cell
-    gl.uniform1f(this.u('uGoo'), cfg.goo * compSize * 0.6 * this.gooAmt)
+    gl.uniform1i(this.u('uSelected'), abstract ? -1 : this.selected)
+    gl.uniform1i(this.u('uLayout'), abstract ? 2 : circle ? 1 : 0)
+
+    gl.activeTexture(gl.TEXTURE0)
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTex)
+    gl.uniform1i(this.u('uMask'), 0)
+
+    if (abstract) {
+      const G = this.mask?.grid ?? cfg.absGrid
+      const cw = 1 / G
+      // Fixed, not gutter-driven. Gutter and goo would be two controls over the
+      // same thing here — how much of a cell survives the merge — and the goo
+      // is the one that also shapes the fillet. Cells sit just short of
+      // touching so the merge has something to close.
+      const cellHalf = (cw * 0.92) / 2
+
+      // Unlike the other layouts, the base goo is *not* gated on hover. Each of
+      // the sixteen components is a cluster of adjacent cells, and they have to
+      // stay fused for it to read as one blob at all — the hover adds to this,
+      // it does not create it.
+      //
+      // The range is far wider than the other layouts get. Two touching squares
+      // merged with a small k still have a staircase outline; the fillet has to
+      // be an appreciable fraction of a cell before a cluster reads as one
+      // organic mass rather than as the pixels it was assembled from. Measured
+      // against the references, that turn happens around 0.9 of a cell.
+      const goo = cw * (0.35 + 1.15 * cfg.goo)
+      // Sized to clear the channel, not guessed. Two clusters are left one
+      // empty cell apart, so their edges are cw - 0.92cw*... — about 1.1 cells
+      // of clear air. The hover fillet has to exceed that to bridge it at all,
+      // which is why this range starts well above the other layouts'.
+      const hoverGoo = cw * (0.55 + 1.7 * cfg.spread) * this.gooAmt
+      const hoverR = 0.05 + 0.2 * cfg.spreadReach
+      const hoverGrow = (0.12 + 0.5 * cfg.lift) * this.gooAmt
+
+      // How far a cell can still touch this fragment. sminBlend clamps h, so a
+      // field beyond k contributes exactly zero — this bound is not a heuristic.
+      // A fragment sits anywhere in its own cell, hence the half-cell slack.
+      const influence = cellHalf * (1 + hoverGrow) + goo + hoverGoo
+      const reach = Math.min(3, Math.max(1, Math.floor(influence / cw + 0.5)))
+
+      gl.uniform1i(this.u('uGridN'), G)
+      gl.uniform1f(this.u('uCellHalf'), cellHalf)
+      gl.uniform1f(this.u('uAbsRadius'), cfg.absRadius)
+      gl.uniform1i(this.u('uReach'), reach)
+      gl.uniform2f(this.u('uPointer'), this.ptr.x, this.ptr.y)
+      gl.uniform1f(this.u('uHover'), this.gooAmt)
+      gl.uniform1f(this.u('uHoverR'), hoverR)
+      gl.uniform1f(this.u('uHoverGoo'), hoverGoo)
+      gl.uniform1f(this.u('uHoverGrow'), hoverGrow)
+      gl.uniform1f(this.u('uGoo'), goo)
+    } else {
+      // Goo in uv units, scaled by the *layout's own* component size — the
+      // disc's rings are narrower than a grid cell, so a single absolute radius
+      // that looks right on the grid fuses the whole disc into one blob.
+      const compSize = circle ? 0.5 / RINGS.length : cell
+      gl.uniform1f(this.u('uGoo'), cfg.goo * compSize * 0.6 * this.gooAmt)
+    }
 
     gl.clearColor(0, 0, 0, 0)
     gl.clear(gl.COLOR_BUFFER_BIT)

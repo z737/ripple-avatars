@@ -4,6 +4,8 @@ import { randomSeed } from '../engine/prng'
 import { PLATFORM_NAME, VERSIONS, VersionId, versionRoute } from '../versions'
 import { configFromSeed, defaultConfig, rerollRadii, tilesFromSeed } from '../v3/genome'
 import {
+  ABSTRACT_GRIDS,
+  ABSTRACT_GRID_LABEL,
   CORNERS,
   CORNER_LABEL,
   GRID,
@@ -160,7 +162,8 @@ export default function TilesPage() {
     />
   )
 
-  const tile = selected >= 0 ? cfg.tiles[selected] : null
+  const abstract = cfg.layout === 'abstract'
+  const tile = selected >= 0 && !abstract ? cfg.tiles[selected] : null
 
   return (
     <div className="app">
@@ -207,6 +210,7 @@ export default function TilesPage() {
                     onPointerMove={(e) => rendererRef.current?.setPointer(uvOf(e))}
                     onPointerLeave={() => rendererRef.current?.setPointer(null)}
                     onPointerDown={(e) => {
+                      if (abstract) return
                       const hit = rendererRef.current?.tileAt(uvOf(e)) ?? -1
                       setSelected((s) => (s === hit ? -1 : hit))
                     }}
@@ -216,10 +220,12 @@ export default function TilesPage() {
               <div className="stage-caption">
                 <span className="seed-chip">{cfg.seed}</span>
                 <span className="t-xs-regular">
-                  {TILE_COUNT} tiles · hue {Math.round(cfg.hue)}°
-                  {selected >= 0
-                    ? ` · editing r${Math.floor(selected / GRID) + 1}c${(selected % GRID) + 1}`
-                    : ' · click a tile to edit its corners'}
+                  {TILE_COUNT} components · hue {Math.round(cfg.hue)}°
+                  {abstract
+                    ? ` · ${cfg.absGrid}×${cfg.absGrid} grid · hover to pull blobs together`
+                    : selected >= 0
+                      ? ` · editing r${Math.floor(selected / GRID) + 1}c${(selected % GRID) + 1}`
+                      : ' · click a component to edit its corners'}
                 </span>
               </div>
             </>
@@ -258,18 +264,50 @@ export default function TilesPage() {
           <Section
             icon={Icons.grid}
             title="Layout"
-            supporting="Sixteen components either way — a grid, or a disc of 1 + 5 + 10."
+            supporting="Sixteen components every way — a grid, a disc of 1 + 5 + 10, or sixteen blobs cut from a fine grid of squares."
           >
             <Segmented
               value={cfg.layout}
               options={LAYOUTS}
               labels={LAYOUT_LABEL}
-              onChange={(v: Layout) => set('layout', v)}
+              onChange={(v: Layout) => {
+                // The corner sliders have nothing to edit in abstract, so drop
+                // the selection rather than leave a ring on a hidden control.
+                if (v === 'abstract') setSelected(-1)
+                set('layout', v)
+              }}
             />
           </Section>
 
           <hr className="panel-divider" />
 
+          {abstract ? (
+            <Section
+              icon={Icons.grid}
+              title="Blobs"
+              supporting="Sixteen clusters grown on a grid, then fused."
+            >
+              <Segmented
+                value={String(cfg.absGrid)}
+                options={ABSTRACT_GRIDS.map(String)}
+                labels={ABSTRACT_GRID_LABEL}
+                onChange={(v) => set('absGrid', Number(v))}
+              />
+              {slider('absDensity')}
+              {slider('absBond')}
+              {slider('absRadius')}
+              <p className="t-xs-regular note">
+                Eight blobs are grown one random cell at a time and mirrored, so the silhouette
+                is symmetric but all sixteen shades still appear. Assigning cells to the nearest
+                seed instead would give straight-edged Voronoi cells; growing them gives lobes
+                and inlets. <em>Bonding</em> is which pairs are allowed to touch — decided before
+                growth, so an unbonded pair simply stops a cell short of each other and the goo
+                cannot bridge the channel. At 0 you get sixteen islands, at 1 one welded mass.
+                Corners share one radius here: the variety comes from how the cells clump, not
+                from the corners.
+              </p>
+            </Section>
+          ) : (
           <Section
             icon={Icons.grid}
             title="Corners"
@@ -321,6 +359,7 @@ export default function TilesPage() {
               </p>
             )}
           </Section>
+          )}
 
           <hr className="panel-divider" />
 
@@ -369,11 +408,23 @@ export default function TilesPage() {
             {slider('spreadReach')}
             {slider('lift')}
             <p className="t-xs-regular note">
-              Hovering pulls neighbours <em>toward</em> the component so their fields overlap and
-              fuse — a neck of surface forms between them and thins as they part. That is a
-              smooth minimum of the distance fields, not a blur-and-threshold pass, so the
-              corners stay sharp everywhere the merge is not happening. Sprung rather than
-              tweened, and under reduced-motion they arrive without the travel.
+              {abstract ? (
+                <>
+                  Goo is how hard the cells inside one blob are fused — abstract needs it on at
+                  rest, or the sixteen components fall back into loose squares. The pointer adds
+                  to it: <em>Reach out</em> is the extra fusion under the cursor, <em>Falloff</em>{' '}
+                  its radius, and <em>Lift</em> swells the cells there so a blob can bridge a gap
+                  and take hold of the one beside it.
+                </>
+              ) : (
+                <>
+                  Hovering pulls neighbours <em>toward</em> the component so their fields overlap
+                  and fuse — a neck of surface forms between them and thins as they part. That is
+                  a smooth minimum of the distance fields, not a blur-and-threshold pass, so the
+                  corners stay sharp everywhere the merge is not happening. Sprung rather than
+                  tweened, and under reduced-motion they arrive without the travel.
+                </>
+              )}
             </p>
           </Section>
 

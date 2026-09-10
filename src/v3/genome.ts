@@ -89,6 +89,15 @@ export function configFromSeed(seed: string, keep?: Partial<V3Config>): V3Config
 
     layout: keep?.layout ?? 'square',
     goo: keep?.goo ?? 0.55,
+
+    absGrid: keep?.absGrid ?? 32,
+    absDensity: keep?.absDensity ?? r.range(0.4, 0.58),
+    absBond: keep?.absBond ?? r.range(0.25, 0.45),
+    // "Decent" rather than extreme: at 0 the merge shows every square it was
+    // cut from, and the mark reads pixelated. High is right here — a cell is
+    // only a building block, and once a cluster is fused what shows is the
+    // outline, not the cells.
+    absRadius: keep?.absRadius ?? 0.85,
   }
 }
 

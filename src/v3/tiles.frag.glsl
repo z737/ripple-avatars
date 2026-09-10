@@ -33,9 +33,24 @@ uniform vec2  uResolution;
 uniform vec4  uTile[N];
 uniform vec4  uRadii[N];  // per-corner radius, as a fraction of the half-extent
 uniform vec3  uColor[N];  // display-ready sRGB, built in OKLCH on the CPU
-uniform int   uLayout;    // 0 square, 1 circle
+uniform int   uLayout;    // 0 square, 1 circle, 2 abstract
 uniform float uGoo;       // smooth-min radius, in uv units
 uniform int   uSelected;
+
+// --- abstract only ---------------------------------------------------------
+/** r = component id + 1, g = fused-cluster id + 1; 0 for an empty cell.
+ *  Integer texture, fetched by index: no filtering, so no ambiguity at a cell
+ *  boundary. */
+uniform highp usampler2D uMask;
+uniform int   uGridN;      // cells per side
+uniform float uCellHalf;   // half-extent of one cell, gutter already removed
+uniform float uAbsRadius;  // one radius for all four corners of every cell
+uniform int   uReach;      // cells to search either side, from the goo radius
+uniform vec2  uPointer;
+uniform float uHover;      // 0 at rest, 1 under the pointer, sprung
+uniform float uHoverR;     // radius of the pointer's influence, uv
+uniform float uHoverGoo;   // extra smooth-min radius at the pointer
+uniform float uHoverGrow;  // extra cell size at the pointer
 
 /** Rounded box with four different corner radii.
  *
@@ -83,24 +98,115 @@ vec2 sminBlend(float a, float b, float k) {
   return vec2(mix(b, a, h) - k * h * (1.0 - h), h);
 }
 
+/** Gaussian bump under the pointer. Everything the hover does in abstract mode
+ *  is a function of this one field, so the reach-out and the swell stay in step
+ *  instead of drifting apart at the edges of the influence. */
+float hoverBump(vec2 p) {
+  vec2 q = p - uPointer;
+  return exp(-dot(q, q) / (uHoverR * uHoverR)) * uHover;
+}
+
+/** Abstract: sixteen clusters of small squares, merged.
+ *
+ *  The 16-component loop above cannot be reused here — a 64x64 grid is 4096
+ *  cells, far past any uniform array, and evaluating all of them per fragment
+ *  would be absurd anyway. Instead the mask lives in a texture and only the
+ *  cells that can actually reach this fragment are evaluated.
+ *
+ *  That bound is exact, not a guess: sminBlend clamps h, so a field further
+ *  than k away contributes precisely nothing. uReach is computed on the CPU
+ *  from the current cell size and goo radius, which is why the cost is flat in
+ *  the grid resolution — nine fetches at rest whether the grid is 16 or 64. */
+void abstractField(vec2 uv, out float d, out vec3 col) {
+  d = 1e9;
+  col = vec3(0.0);
+
+  float cw = 1.0 / float(uGridN);
+  ivec2 base = ivec2(floor(uv / cw));
+  float bump = hoverBump(uv);
+
+  // Two fillet radii, and the split is what makes Bonding mean anything.
+  //
+  // `inner` fuses cells that belong to the same cluster, and has to be close to
+  // a whole cell wide or the cluster keeps the staircase outline of the squares
+  // it was cut from. But the channel left between two unbonded clusters is only
+  // about one cell wide too, so one radius for everything would weld the entire
+  // disc into a single mass however Bonding was set.
+  //
+  // `outer` is therefore zero at rest — clusters meet with a hard minimum,
+  // which never bulges, so the channels stay exactly as wide as the geometry
+  // makes them. The pointer is the only thing that opens it, and that *is* the
+  // interaction: hovering is what attaches one component to the one beside it.
+  float inner = max(uGoo + uHoverGoo * bump, 1e-5);
+  float outer = max(uHoverGoo * bump, 1e-5);
+
+  uint grpAcc = 0u;
+  bool first = true;
+
+  for (int dy = -uReach; dy <= uReach; dy++) {
+    for (int dx = -uReach; dx <= uReach; dx++) {
+      ivec2 c = base + ivec2(dx, dy);
+      if (c.x < 0 || c.y < 0 || c.x >= uGridN || c.y >= uGridN) continue;
+
+      uvec2 s = texelFetch(uMask, c, 0).rg;
+      uint id = s.r;
+      uint grp = s.g;
+      if (id == 0u) continue;
+
+      vec2 ctr = (vec2(c) + 0.5) * cw;
+      // Cells swell toward the pointer, which is what lets a blob reach across
+      // a gap and take hold of the one next to it. Sizing the swell by the cell
+      // centre rather than by the fragment keeps each square a square.
+      float hs = uCellHalf * (1.0 + uHoverGrow * hoverBump(ctr));
+
+      float di = sdBoxCorners(uv - ctr, vec2(hs), vec4(uAbsRadius));
+      vec3 ci = uColor[int(id) - 1];
+
+      if (first) {
+        d = di;
+        col = ci;
+        grpAcc = grp;
+        first = false;
+      } else {
+        float k = (grp == grpAcc) ? inner : outer;
+        vec2 m = sminBlend(d, di, k);
+        // The nearer of the two fields owns the accumulator's cluster, so the
+        // comparison has to happen before d is replaced.
+        if (di < d) grpAcc = grp;
+        d = m.x;
+        col = mix(ci, col, m.y);
+      }
+    }
+  }
+}
+
 void main() {
   // y down, so component 0 is top-left in both the shader and the editor
   vec2 uv = vec2(gl_FragCoord.x, uResolution.y - gl_FragCoord.y) / uResolution;
   float px = 1.0 / uResolution.y;
 
-  float k = max(uGoo, 1e-5);
+  float d;
+  vec3 col;
+  float sel = 0.0;
 
-  float d = sdComponent(uv, uTile[0], uRadii[0]);
-  vec3 col = uColor[0];
-  float sel = (uSelected == 0) ? 1.0 : 0.0;
+  if (uLayout == 2) {
+    // No selection ring: abstract has no per-corner radii to point at.
+    abstractField(uv, d, col);
+  } else {
+    float k = max(uGoo, 1e-5);
 
-  for (int i = 1; i < N; i++) {
-    float di = sdComponent(uv, uTile[i], uRadii[i]);
-    vec2 m = sminBlend(d, di, k);
-    d = m.x;
-    // h is 1 where the accumulator dominates, 0 where the new component does
-    col = mix(uColor[i], col, m.y);
-    sel = mix((uSelected == i) ? 1.0 : 0.0, sel, m.y);
+    d = sdComponent(uv, uTile[0], uRadii[0]);
+    col = uColor[0];
+    sel = (uSelected == 0) ? 1.0 : 0.0;
+
+    for (int i = 1; i < N; i++) {
+      float di = sdComponent(uv, uTile[i], uRadii[i]);
+      vec2 m = sminBlend(d, di, k);
+      d = m.x;
+      // h is 1 where the accumulator dominates, 0 where the new component does
+      col = mix(uColor[i], col, m.y);
+      sel = mix((uSelected == i) ? 1.0 : 0.0, sel, m.y);
+    }
   }
 
   // 1.5px of feather: enough to kill the stair-step without visibly softening
