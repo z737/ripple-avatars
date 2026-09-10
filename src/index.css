@@ -545,6 +545,22 @@ a.btn {
   transform: translateX(18px);
 }
 
+/* --- v3 ------------------------------------------------------------------- */
+/* No plate behind the mark: the canvas is transparent and the components
+   displace against the page itself, so any border or fill here would reinstate
+   exactly the frame that was removed. */
+.tile-box {
+  width: 100%;
+  height: 100%;
+  line-height: 0;
+}
+.tile-box canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
 /* --- v3 shade strip ------------------------------------------------------- */
 .shade-chip {
   flex: 1 0 0;

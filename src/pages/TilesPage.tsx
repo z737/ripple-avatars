@@ -7,6 +7,9 @@ import {
   CORNERS,
   CORNER_LABEL,
   GRID,
+  LAYOUTS,
+  LAYOUT_LABEL,
+  Layout,
   TILE_COUNT,
   V3Config,
   V3RangeKey,
@@ -18,6 +21,7 @@ import {
   Button,
   Icons,
   Section,
+  Segmented,
   Slider,
   TextField,
   VersionPicker,
@@ -197,7 +201,7 @@ export default function TilesPage() {
           ) : (
             <>
               <div className="pg-stage" style={{ width: size, height: size }}>
-                <div className="pg-canvas-box" ref={boxRef}>
+                <div className="tile-box" ref={boxRef}>
                   <canvas
                     ref={canvasRef}
                     onPointerMove={(e) => rendererRef.current?.setPointer(uvOf(e))}
@@ -253,8 +257,23 @@ export default function TilesPage() {
 
           <Section
             icon={Icons.grid}
+            title="Layout"
+            supporting="Sixteen components either way — a grid, or a disc of 1 + 5 + 10."
+          >
+            <Segmented
+              value={cfg.layout}
+              options={LAYOUTS}
+              labels={LAYOUT_LABEL}
+              onChange={(v: Layout) => set('layout', v)}
+            />
+          </Section>
+
+          <hr className="panel-divider" />
+
+          <Section
+            icon={Icons.grid}
             title="Corners"
-            supporting="Click a tile on the canvas to adjust its four radii."
+            supporting="Click a component on the canvas to adjust its four radii."
           >
             {slider('roundness')}
             <Slider
@@ -320,7 +339,6 @@ export default function TilesPage() {
             />
             {slider('saturation')}
             {slider('shadeSpread')}
-            {slider('background')}
             <div className="swatches">
               <div className="swatch-row">
                 {cfg.tiles.map((t, i) => {
@@ -343,16 +361,19 @@ export default function TilesPage() {
 
           <Section
             icon={Icons.water}
-            title="Hover"
-            supporting="A tile lifts and pushes its neighbours apart."
+            title="Gooey hover"
+            supporting="A component lifts and fuses with the ones beside it."
           >
+            {slider('goo')}
             {slider('spread')}
             {slider('spreadReach')}
             {slider('lift')}
             <p className="t-xs-regular note">
-              Neighbours are pushed radially away from the hovered tile, falling off with ring
-              distance, and sprung rather than tweened so they settle instead of stopping dead.
-              Under reduced-motion they arrive without the travel.
+              Hovering pulls neighbours <em>toward</em> the component so their fields overlap and
+              fuse — a neck of surface forms between them and thins as they part. That is a
+              smooth minimum of the distance fields, not a blur-and-threshold pass, so the
+              corners stay sharp everywhere the merge is not happening. Sprung rather than
+              tweened, and under reduced-motion they arrive without the travel.
             </p>
           </Section>
 

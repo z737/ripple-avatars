@@ -37,10 +37,3 @@ export function shadeRgb(cfg: V3Config, shade: number): Rgb {
 
   return oklch(L, Math.max(C, 0), cfg.hue)
 }
-
-/** The paper the mark sits on. A tint of the same hue rather than pure white,
- *  so the palest tiles still separate from it. */
-export function bgRgb(cfg: V3Config): Rgb {
-  const L = 1 - 0.86 * cfg.background
-  return oklch(L, cfg.saturation * 0.035, cfg.hue)
-}

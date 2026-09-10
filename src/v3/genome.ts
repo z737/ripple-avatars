@@ -83,10 +83,12 @@ export function configFromSeed(seed: string, keep?: Partial<V3Config>): V3Config
     radiusMax,
     roundness,
 
-    spread: keep?.spread ?? 0.45,
-    spreadReach: keep?.spreadReach ?? 0.4,
-    lift: keep?.lift ?? 0.35,
-    background: keep?.background ?? 0.06,
+    spread: keep?.spread ?? 0.5,
+    spreadReach: keep?.spreadReach ?? 0.35,
+    lift: keep?.lift ?? 0.4,
+
+    layout: keep?.layout ?? 'square',
+    goo: keep?.goo ?? 0.55,
   }
 }
 
